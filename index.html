@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<title>Tetris (NES 룰) + BGM v4.9.1 [Tap-Queue]</title>
+<title>Tetris (NES 룰) + BGM v4.9.2 [NaN fix]</title>
 <style>
   :root { --bg:#0f1115; --panel:rgba(255,255,255,0.06); --accent:#7dd3fc; --btn:#1f2937; --btnBorder:rgba(255,255,255,.18); }
   html, body { margin:0; padding:0; height:100%; background:linear-gradient(180deg,#0f1115,#0b0d11); color:#e5e7eb; font:14px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Pretendard,Apple SD Gothic Neo,Malgun Gothic,Arial,sans-serif; overscroll-behavior: none; }
@@ -260,12 +260,12 @@
   function focusGame(){ canvas.focus({preventScroll:true}); }
   function makeBoard(){ const b=[]; for(let r=0;r<ROWS;r++) b[r]=new Array(COLS).fill(null); return b; }
   function clone(m){ return m.map(row=>row.slice()); }
-  function rotateCW(m){ const h=m.length,w=m[0].length; const out=[]; for(let x=0;x<w;x++){ const row=[]; for(let y=h-1;y>=0;y--) row.push(m[y][x]); out.push(row);} return out; }
+  function rotateCW(m){ const h=m.length,w=m[0].length; const out=[]; for(let x=0;x<w;x++){ const row=[]; for(let y=h-1;y>=0;y--){ row.push(m[y][x]); } out.push(row);} return out; }
   function getShape(t){ return clone(SHAPES[t]); }
 
   function spawn(){ const t=nextType; nextType=pickType(); current={ t, m:getShape(t), x:(COLS/2|0)-2, y:-2 }; if(collides(current,current.x,current.y)){ gameOver(); } }
   function collides(piece,nx,ny,nm){ const m=nm||piece.m; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(!m[y][x]) continue; const bx=nx+x, by=ny+y; if(bx<0||bx>=COLS||by>=ROWS) return true; if(by>=0 && board[by][bx]) return true; } return false; }
-  function tryMove(dx,dy){ const nx=current.x+dx, ny=current.y+dy; if(!collides(current,nx,ny)){ current.x=nx; current.y=ny; return true; } return false; }
+  function tryMove(dx,dy){ const nx=current.x+dx, ny=current.y+(dy||0); if(!collides(current,nx,ny)){ current.x=nx; current.y=ny; return true; } return false; }
   function rotate(){ let nm=rotateCW(current.m); if(!collides(current,current.x,current.y,nm)) current.m=nm; }
   function softStep(){ if(!tryMove(0,1)) lock(); }
   function hardDrop(){ while(tryMove(0,1)){} lock(); }
@@ -273,15 +273,15 @@
   function clearLines(){ let cleared=0; for(let r=ROWS-1;r>=0;r--){ if(board[r].every(v=>!!v)){ board.splice(r,1); board.unshift(new Array(COLS).fill(null)); cleared++; r++; } } if(cleared>0){ lines+=cleared; if(lines>=(level+1)*10){ level++; dropInterval=gravityMsForLevel(level); } } }
 
   function handleHorizontal(now){
-    // 1) Consume taps (guaranteed single steps)
-    if(taps.left>0){ if(tryMove(-1,0)){} taps.left=0; hDir = 'L'; nextHMoveAt = now + dasMs; }
-    else if(taps.right>0){ if(tryMove(1,0)){} taps.right=0; hDir = 'R'; nextHMoveAt = now + dasMs; }
-    // 2) Handle holds
+    // Consume taps
+    if(taps.left>0){ tryMove(-1,0); taps.left=0; hDir='L'; nextHMoveAt=now+dasMs; }
+    else if(taps.right>0){ tryMove(1,0); taps.right=0; hDir='R'; nextHMoveAt=now+dasMs; }
+    // Holds
     const want = input.left ? 'L' : input.right ? 'R' : null;
     if(!want){ hDir=null; return; }
-    if(want !== hDir){ hDir = want; tryMove(hDir==='L'?-1:1); nextHMoveAt = now + dasMs; return; }
+    if(want !== hDir){ hDir=want; tryMove(hDir==='L'?-1:1, 0); nextHMoveAt = now + dasMs; return; } // FIX: pass dy=0
     while(now >= nextHMoveAt){
-      if(!tryMove(hDir==='L'?-1:1)) break;
+      if(!tryMove(hDir==='L'?-1:1, 0)) break;  // FIX: pass dy=0
       nextHMoveAt += arrMs;
       if(arrMs <= 0) break;
     }
@@ -296,9 +296,16 @@
     }
   }
 
+  function sanitizeCurrent(){
+    if(!current) return;
+    if(!Number.isFinite(current.x)) current.x = (COLS/2|0)-2;
+    if(!Number.isFinite(current.y)) current.y = -2;
+  }
+
   function update(dt){
     if(!running){ return; }
-    if(!current){ spawn(); } // safety
+    if(!current){ spawn(); }
+    sanitizeCurrent();
     acc += dt;
     const now = performance.now();
     handleHorizontal(now);
@@ -312,18 +319,12 @@
     const wScale=Math.floor(rect.width/(COLS*SIZE)), hScale=Math.floor(rect.height/(ROWS*SIZE)), scale=Math.max(1, Math.min(wScale,hScale));
     canvas.style.width=(COLS*SIZE*scale)+'px'; canvas.style.height=(ROWS*SIZE*scale)+'px';
     ctx.clearRect(0,0,canvas.width,canvas.height);
-    // grid
-    ctx.strokeStyle='rgba(255,255,255,0.04)';
-    for(let y=0;y<=ROWS;y++){ ctx.beginPath(); ctx.moveTo(0,y*SIZE+0.5); ctx.lineTo(COLS*SIZE,y*SIZE+0.5); ctx.stroke(); }
-    for(let x=0;x<=COLS;x++){ ctx.beginPath(); ctx.moveTo(x*SIZE+0.5,0); ctx.lineTo(x*SIZE+0.5,ROWS*SIZE); ctx.stroke(); }
-    // cells
     for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){ const t=board[y][x]; drawCell(ctx,x*SIZE,y*SIZE,SIZE,t?COLORS[t]:COLORS.X); }
     if(current){ const m=current.m, color=COLORS[current.t]; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(m[y][x]) drawCell(ctx,(current.x+x)*SIZE,(current.y+y)*SIZE,SIZE,color); } }
     dbgEl.textContent = JSON.stringify({ x: current?current.x:null, y: current?current.y:null, hDir, tapsL:taps.left, tapsR:taps.right, left:input.left, right:input.right, down:input.down });
   }
 
   function loop(ts){ try{ const dt=ts-lastTime; lastTime=ts; update(dt); render(); }catch(e){ toast('루프 에러: '+e.message); } requestAnimationFrame(loop); }
-
   function startGame(){ if(current==null) spawn(); running=true; requestAnimationFrame(loop); }
   function gameOver(){ running=false; toast('Game Over'); resetGame(true); }
   function resetGame(keepOverlay){ board=makeBoard(); current=null; nextType=pickType(); dropInterval=gravityMsForLevel(level=0); lastTime=0; acc=0; lines=0; if(!keepOverlay){ overlay.classList.remove('hidden'); } }
