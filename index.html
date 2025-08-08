@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<title>Tetris (NES 룰) + BGM v4.9 [State Input]</title>
+<title>Tetris (NES 룰) + BGM v4.9.1 [Tap-Queue]</title>
 <style>
   :root { --bg:#0f1115; --panel:rgba(255,255,255,0.06); --accent:#7dd3fc; --btn:#1f2937; --btnBorder:rgba(255,255,255,.18); }
   html, body { margin:0; padding:0; height:100%; background:linear-gradient(180deg,#0f1115,#0b0d11); color:#e5e7eb; font:14px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Pretendard,Apple SD Gothic Neo,Malgun Gothic,Arial,sans-serif; overscroll-behavior: none; }
@@ -27,7 +27,7 @@
   input[type="number"] { width:80px; }
   label small { opacity:.8; }
   #err { position:fixed; left:10px; bottom:10px; background:#c00; color:#fff; padding:8px 10px; border-radius:8px; font-size:12px; z-index:9999; white-space:pre-wrap; display:none; }
-  #dbg { position:fixed; right:10px; bottom:10px; font-size:11px; color:#9ca3af; }
+  #dbg { position:fixed; right:10px; bottom:10px; font-size:11px; color:#9ca3af; white-space:pre; background:rgba(0,0,0,.35); padding:6px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.15); }
   #mobileControls {
     position: fixed; left: 0; right: 0; bottom: 0;
     padding: 8px calc(12px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
@@ -124,7 +124,7 @@
   window.addEventListener('error', e => toast('에러: ' + (e.message||e.toString())));
   window.addEventListener('unhandledrejection', e => toast('Promise 에러: ' + ((e.reason&&(e.reason.message||e.reason.toString()))||'unknown')));
 
-  // ====== BGM with WebAudio & ABC cycle (same as before) ======
+  // ====== BGM (same) ======
   const TRACKS = { A:'bgm_A.mp3', B:'bgm_B.mp3', C:'bgm_C.mp3' };
   const order = ['A','B','C'];
   const bgmEl = document.getElementById('bgmAudio');
@@ -183,7 +183,7 @@
   setStartBtn.addEventListener('click', ()=>{ loopStartEl.value=bgmEl.currentTime.toFixed(2); applyLoopInputs(); });
   setEndBtn.addEventListener('click', ()=>{ loopEndEl.value=bgmEl.currentTime.toFixed(2); applyLoopInputs(); });
 
-  // ====== Game (state-driven input) ======
+  // ====== Game (tap-queue + state-driven hold) ======
   const COLS=10, ROWS=20, SIZE=32;
   const COLORS={ I:'#67e8f9', J:'#60a5fa', L:'#f59e0b', O:'#fef08a', S:'#34d399', T:'#c084fc', Z:'#f87171', X:'#0b0d12' };
   const SHAPES={
@@ -203,67 +203,30 @@
   const canvas=document.getElementById('game'); const ctx=canvas.getContext('2d'); ctx.imageSmoothingEnabled=false;
   let board=makeBoard(); let current=null; let nextType=pickType(); let dropInterval=gravityMsForLevel(0); let lastTime=0; let acc=0; let running=false; let lines=0, level=0;
 
-  // Input state & DAS/ARR
-  const dasEl=document.getElementById('dasMs');
-  const arrEl=document.getElementById('arrMs');
-  const softEl=document.getElementById('softMs');
-  let dasMs = parseFloat(dasEl.value)||130;
-  let arrMs = parseFloat(arrEl.value)||50;
-  let softMs = parseFloat(softEl.value)||50;
-  dasEl.addEventListener('input', ()=> dasMs = Math.max(0, parseFloat(dasEl.value)||0));
-  arrEl.addEventListener('input', ()=> arrMs = Math.max(0, parseFloat(arrEl.value)||0));
-  softEl.addEventListener('input', ()=> softMs = Math.max(0, parseFloat(softEl.value)||0));
+  // Input state & timing
+  const dasEl=document.getElementById('dasMs'), arrEl=document.getElementById('arrMs'), softEl=document.getElementById('softMs');
+  let dasMs=parseFloat(dasEl.value)||130, arrMs=parseFloat(arrEl.value)||50, softMs=parseFloat(softEl.value)||50;
+  dasEl.addEventListener('input', ()=> dasMs=Math.max(0,parseFloat(dasEl.value)||0));
+  arrEl.addEventListener('input', ()=> arrMs=Math.max(0,parseFloat(arrEl.value)||0));
+  softEl.addEventListener('input', ()=> softMs=Math.max(0,parseFloat(softEl.value)||0));
 
-  const input = { left:false, right:false, down:false };
-  let hDir = null; // 'L'|'R'|null (active held dir)
-  let nextHMoveAt = 0;
-  let nextSoftAt = 0;
+  const input={ left:false, right:false, down:false };
+  const taps={ left:0, right:0 }; // queued discrete taps
+  let hDir=null; // 'L'|'R'|null
+  let nextHMoveAt=0, nextSoftAt=0;
 
-  function setLeft(v){ if(v){ input.left=true; input.right=false; } else { input.left=false; } }
-  function setRight(v){ if(v){ input.right=true; input.left=false; } else { input.right=false; } }
+  function setLeft(v){ if(v){ input.left=true; input.right=false; } else input.left=false; }
+  function setRight(v){ if(v){ input.right=true; input.left=false; } else input.right=false; }
   function setDown(v){ input.down=!!v; }
 
-  function handleHorizontal(now){
-    const want = input.left ? 'L' : input.right ? 'R' : null;
-    if(want !== hDir){
-      hDir = want;
-      if(hDir){
-        tryMove(hDir==='L'?-1:1); // immediate nudge
-        nextHMoveAt = now + dasMs;
-      }
-      return;
-    }
-    if(!hDir) return;
-    while(now >= nextHMoveAt){
-      if(!tryMove(hDir==='L'?-1:1)) break;
-      nextHMoveAt += arrMs;
-      // protect against too small arr leading to while loop lock
-      if(arrMs <= 0){ break; }
-    }
-  }
-
-  function handleSoft(now){
-    if(!input.down){ nextSoftAt = now + softMs; return; }
-    while(now >= nextSoftAt){
-      if(!tryMove(0,1)){ lock(); break; }
-      nextSoftAt += softMs;
-      if(softMs <= 0){ break; }
-    }
-  }
-
-  // UI buttons (Pointer Events)
+  // Bind mobile buttons
   function bindHold(btn, onPress, onRelease){
-    btn.addEventListener('pointerdown', e=>{
-      e.preventDefault(); e.stopPropagation();
-      try{ btn.setPointerCapture(e.pointerId); }catch{}
-      onPress();
-    });
-    const end = e=>{ e.preventDefault(); onRelease && onRelease(); };
-    ['pointerup','pointercancel','pointerleave'].forEach(ev=> btn.addEventListener(ev, end));
+    btn.addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); try{ btn.setPointerCapture(e.pointerId);}catch{} onPress(); });
+    ['pointerup','pointercancel','pointerleave'].forEach(ev=> btn.addEventListener(ev, e=>{ e.preventDefault(); onRelease&&onRelease(); }));
     btn.addEventListener('contextmenu', e=> e.preventDefault());
   }
-  bindHold(document.getElementById('mLeft'), ()=> setLeft(true), ()=> setLeft(false));
-  bindHold(document.getElementById('mRight'), ()=> setRight(true), ()=> setRight(false));
+  bindHold(document.getElementById('mLeft'), ()=>{ taps.left++; setLeft(true); }, ()=> setLeft(false));
+  bindHold(document.getElementById('mRight'), ()=>{ taps.right++; setRight(true); }, ()=> setRight(false));
   bindHold(document.getElementById('mSoft'), ()=> setDown(true), ()=> setDown(false));
   document.getElementById('mRotate').addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); rotate(); });
   document.getElementById('mHard').addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); hardDrop(); });
@@ -272,44 +235,32 @@
   const lockKeysEl=document.getElementById('lockKeys');
   const enableHardDropEl=document.getElementById('enableHardDrop');
   window.addEventListener('keydown', (e)=>{
-    const k=e.key;
-    const isGameKey=(k==='ArrowLeft'||k==='ArrowRight'||k==='ArrowUp'||k==='ArrowDown'||k===' '||k==='x'||k==='X'||k==='p'||k==='P'||k==='r'||k==='R');
+    const k=e.key; const isGameKey=(k==='ArrowLeft'||k==='ArrowRight'||k==='ArrowDown'||k==='ArrowUp'||k==='x'||k==='X'||k===' '||k==='p'||k==='P'||k==='r'||k==='R');
     if(!isGameKey) return;
     if(lockKeysEl.checked){ e.preventDefault(); e.stopPropagation(); }
-    if(k==='ArrowLeft') setLeft(true);
-    else if(k==='ArrowRight') setRight(true);
-    else if(k==='ArrowDown') setDown(true);
-    else if(k==='ArrowUp' || k==='x' || k==='X') rotate();
-    else if(k===' ' && enableHardDropEl.checked) hardDrop();
-    else if(k==='p' || k==='P'){ running = !running; }
-    else if(k==='r' || k==='R'){ resetGame(); }
+    if(k==='ArrowLeft'){ taps.left++; setLeft(true); }
+    else if(k==='ArrowRight'){ taps.right++; setRight(true); }
+    else if(k==='ArrowDown'){ setDown(true); }
+    else if(k==='ArrowUp'||k==='x'||k==='X'){ rotate(); }
+    else if(k===' ' && enableHardDropEl.checked){ hardDrop(); }
+    else if(k==='p'||k==='P'){ running=!running; }
+    else if(k==='r'||k==='R'){ resetGame(); }
   }, true);
-  window.addEventListener('keyup', (e)=>{
-    const k=e.key;
-    if(k==='ArrowLeft') setLeft(false);
-    else if(k==='ArrowRight') setRight(false);
-    else if(k==='ArrowDown') setDown(false);
-  }, true);
+  window.addEventListener('keyup', (e)=>{ const k=e.key; if(k==='ArrowLeft') setLeft(false); else if(k==='ArrowRight') setRight(false); else if(k==='ArrowDown') setDown(false); }, true);
 
   // Start / Pause / Reset
   const overlay=document.getElementById('overlay');
   document.getElementById('startBtn').addEventListener('click', async ()=>{
-    const ok=await initAudio(); 
-    applyLoopInputs();
-    setTrack(trackSel.value);
-    if(ok) fadeTo(1.0, parseFloat(fadeInEl.value)||0);
-    overlay.classList.add('hidden');
-    focusGame();
-    startGame();
+    const ok=await initAudio(); applyLoopInputs(); setTrack(trackSel.value); if(ok) fadeTo(1.0, parseFloat(fadeInEl.value)||0);
+    overlay.classList.add('hidden'); focusGame(); startGame();
   });
   document.getElementById('btnPause').addEventListener('click', ()=>{ running=!running; if(running) focusGame(); });
   document.getElementById('btnReset').addEventListener('click', ()=>{ resetGame(); focusGame(); });
 
   function focusGame(){ canvas.focus({preventScroll:true}); }
-
-  function makeBoard(){ const b=[]; for(let r=0;r<ROWS;r++){ b[r]=new Array(COLS).fill(null);} return b; }
+  function makeBoard(){ const b=[]; for(let r=0;r<ROWS;r++) b[r]=new Array(COLS).fill(null); return b; }
   function clone(m){ return m.map(row=>row.slice()); }
-  function rotateCW(m){ const h=m.length,w=m[0].length; const out=[]; for(let x=0;x<w;x++){ const row=[]; for(let y=h-1;y>=0;y--){ row.push(m[y][x]); } out.push(row);} return out; }
+  function rotateCW(m){ const h=m.length,w=m[0].length; const out=[]; for(let x=0;x<w;x++){ const row=[]; for(let y=h-1;y>=0;y--) row.push(m[y][x]); out.push(row);} return out; }
   function getShape(t){ return clone(SHAPES[t]); }
 
   function spawn(){ const t=nextType; nextType=pickType(); current={ t, m:getShape(t), x:(COLS/2|0)-2, y:-2 }; if(collides(current,current.x,current.y)){ gameOver(); } }
@@ -321,33 +272,58 @@
   function lock(){ const m=current.m; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(!m[y][x]) continue; const bx=current.x+x, by=current.y+y; if(by>=0) board[by][bx]=current.t; } clearLines(); spawn(); }
   function clearLines(){ let cleared=0; for(let r=ROWS-1;r>=0;r--){ if(board[r].every(v=>!!v)){ board.splice(r,1); board.unshift(new Array(COLS).fill(null)); cleared++; r++; } } if(cleared>0){ lines+=cleared; if(lines>=(level+1)*10){ level++; dropInterval=gravityMsForLevel(level); } } }
 
+  function handleHorizontal(now){
+    // 1) Consume taps (guaranteed single steps)
+    if(taps.left>0){ if(tryMove(-1,0)){} taps.left=0; hDir = 'L'; nextHMoveAt = now + dasMs; }
+    else if(taps.right>0){ if(tryMove(1,0)){} taps.right=0; hDir = 'R'; nextHMoveAt = now + dasMs; }
+    // 2) Handle holds
+    const want = input.left ? 'L' : input.right ? 'R' : null;
+    if(!want){ hDir=null; return; }
+    if(want !== hDir){ hDir = want; tryMove(hDir==='L'?-1:1); nextHMoveAt = now + dasMs; return; }
+    while(now >= nextHMoveAt){
+      if(!tryMove(hDir==='L'?-1:1)) break;
+      nextHMoveAt += arrMs;
+      if(arrMs <= 0) break;
+    }
+  }
+
+  function handleSoft(now){
+    if(!input.down){ nextSoftAt = now + softMs; return; }
+    while(now >= nextSoftAt){
+      if(!tryMove(0,1)){ lock(); break; }
+      nextSoftAt += softMs;
+      if(softMs <= 0) break;
+    }
+  }
+
   function update(dt){
-    if(!running) return;
+    if(!running){ return; }
+    if(!current){ spawn(); } // safety
     acc += dt;
     const now = performance.now();
     handleHorizontal(now);
     handleSoft(now);
-    if(acc >= dropInterval){
-      if(!input.down){ // gravity only when not soft-dropping at fixed interval
-        if(!tryMove(0,1)) lock();
-      }
-      acc = 0;
-    }
+    if(acc >= dropInterval){ if(!input.down){ if(!tryMove(0,1)) lock(); } acc = 0; }
   }
 
   function drawCell(c,x,y,s,color){ c.fillStyle=color; c.fillRect(x,y,s,s); c.strokeStyle='rgba(0,0,0,0.35)'; c.lineWidth=2; c.strokeRect(x+1,y+1,s-2,s-2); c.strokeStyle='rgba(255,255,255,0.12)'; c.lineWidth=2; c.strokeRect(x+0.5,y+0.5,s-1,s-1); }
   function render(){
     const rect=document.getElementById('stage').getBoundingClientRect();
-    const wScale=Math.floor(rect.width/(COLS*SIZE)), hScale=Math.floor(rect.height/(ROWS*SIZE));
-    const scale=Math.max(1, Math.min(wScale,hScale));
-    canvas.style.width=(COLS*SIZE*scale)+'px';
-    canvas.style.height=(ROWS*SIZE*scale)+'px';
+    const wScale=Math.floor(rect.width/(COLS*SIZE)), hScale=Math.floor(rect.height/(ROWS*SIZE)), scale=Math.max(1, Math.min(wScale,hScale));
+    canvas.style.width=(COLS*SIZE*scale)+'px'; canvas.style.height=(ROWS*SIZE*scale)+'px';
     ctx.clearRect(0,0,canvas.width,canvas.height);
+    // grid
+    ctx.strokeStyle='rgba(255,255,255,0.04)';
+    for(let y=0;y<=ROWS;y++){ ctx.beginPath(); ctx.moveTo(0,y*SIZE+0.5); ctx.lineTo(COLS*SIZE,y*SIZE+0.5); ctx.stroke(); }
+    for(let x=0;x<=COLS;x++){ ctx.beginPath(); ctx.moveTo(x*SIZE+0.5,0); ctx.lineTo(x*SIZE+0.5,ROWS*SIZE); ctx.stroke(); }
+    // cells
     for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){ const t=board[y][x]; drawCell(ctx,x*SIZE,y*SIZE,SIZE,t?COLORS[t]:COLORS.X); }
     if(current){ const m=current.m, color=COLORS[current.t]; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(m[y][x]) drawCell(ctx,(current.x+x)*SIZE,(current.y+y)*SIZE,SIZE,color); } }
+    dbgEl.textContent = JSON.stringify({ x: current?current.x:null, y: current?current.y:null, hDir, tapsL:taps.left, tapsR:taps.right, left:input.left, right:input.right, down:input.down });
   }
 
-  function loop(ts){ try{ const dt=ts-lastTime; lastTime=ts; update(dt); render(); dbgEl.textContent='dt:'+Math.round(dt)+'ms  level:'+level+'  running:'+(running?1:0); }catch(e){ toast('루프 에러: '+e.message); } requestAnimationFrame(loop); }
+  function loop(ts){ try{ const dt=ts-lastTime; lastTime=ts; update(dt); render(); }catch(e){ toast('루프 에러: '+e.message); } requestAnimationFrame(loop); }
+
   function startGame(){ if(current==null) spawn(); running=true; requestAnimationFrame(loop); }
   function gameOver(){ running=false; toast('Game Over'); resetGame(true); }
   function resetGame(keepOverlay){ board=makeBoard(); current=null; nextType=pickType(); dropInterval=gravityMsForLevel(level=0); lastTime=0; acc=0; lines=0; if(!keepOverlay){ overlay.classList.remove('hidden'); } }
