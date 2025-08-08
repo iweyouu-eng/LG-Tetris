@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<title>Tetris (NES 룰) + BGM v4.9.3b [DBG copy]</title>
+<title>Tetris (NES 룰) + BGM v4.9.4 [Start Fix]</title>
 <style>
   :root { --bg:#0f1115; --panel:rgba(255,255,255,0.06); --accent:#7dd3fc; --btn:#1f2937; --btnBorder:rgba(255,255,255,.18); }
   html, body { margin:0; padding:0; height:100%; background:linear-gradient(180deg,#0f1115,#0b0d11); color:#e5e7eb; font:14px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Pretendard,Apple SD Gothic Neo,Malgun Gothic,Arial,sans-serif; overscroll-behavior: none; }
@@ -12,13 +12,13 @@
   .card { background: var(--panel); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:10px; }
   #stage { position:relative; display:flex; justify-content:center; align-items:center; min-height:60vh; touch-action:none; overscroll-behavior: contain; }
   #game { background:#111; border:1px solid rgba(255,255,255,.1); border-radius:8px; image-rendering: pixelated; outline:none; touch-action:none; }
-  #overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.55); border-radius:10px; }
+  #overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.55); border-radius:10px; z-index:1500; }
   #overlay.hidden { display:none; }
   #overlay .box { text-align:center; }
   .btn { background:var(--btn); color:#fff; border:1px solid var(--btnBorder); border-radius:12px; padding:10px 12px; cursor:pointer; }
   .btn:disabled{ opacity:.5; cursor:not-allowed; }
-  #dbg { position:fixed; right:10px; bottom:110px; font-size:11px; color:#e5e7eb; white-space:pre; background:rgba(0,0,0,.55); padding:6px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.15); z-index:1001; 
-         backdrop-filter: blur(2px); max-width: 80vw; }
+  #dbg { position:fixed; right:10px; bottom:110px; font-size:11px; color:#e5e7eb; white-space:pre; background:rgba(0,0,0,.55); padding:6px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.15); z-index:1400; 
+         backdrop-filter: blur(2px); max-width:80vw; }
   #dbg.top { left:10px; top:10px; right:auto; bottom:auto; }
   #dbg::after { content:' 탭하면 복사 '; font-size:10px; opacity:.7; }
   #mobileControls {
@@ -35,9 +35,16 @@
   .mbtn:active { transform: translateY(1px); }
   .hidden { display:none !important; }
   .muted { opacity:.55; pointer-events:none; }
+  /* Floating start FAB (backup) */
+  #startFab {
+    position: fixed; right: 12px; top: 12px; z-index: 1600;
+    background: #16a34a; color: #fff; border: none; border-radius: 9999px;
+    padding: 10px 14px; font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  }
 </style>
 </head>
 <body>
+<button id="startFab" title="시작이 안 눌리면 이걸 탭하세요">▶ 시작</button>
 <div id="dbg"></div>
 <div class="wrap">
   <div class="card" id="stage">
@@ -46,7 +53,10 @@
       <div class="box">
         <h2 style="margin:0 0 10px 0;">Tetris (NES) + BGM</h2>
         <p class="note">시작을 누르면 오디오 권한이 활성화되고 BGM이 재생됩니다.</p>
-        <button id="startBtn" class="btn">▶ 시작</button>
+        <div style="display:flex; gap:8px; justify-content:center;">
+          <button id="startBtn" class="btn" onclick="window.__startGameFromUI&&window.__startGameFromUI(true)">▶ 시작</button>
+          <button id="startNoAudioBtn" class="btn" onclick="window.__startGameFromUI&&window.__startGameFromUI(false)">음악 없이 시작</button>
+        </div>
       </div>
     </div>
     <audio id="bgmAudio" preload="auto"></audio>
@@ -111,57 +121,25 @@
 <script>
 (function(){
   const dbgEl = document.getElementById('dbg');
-  let dbgPosTop = window.matchMedia('(max-width: 950px)').matches; // phone default top
+  const overlay = document.getElementById('overlay');
+  const startFab = document.getElementById('startFab');
+  function dbg(o){ try{ dbgEl.textContent = JSON.stringify(o); }catch{} }
+
+  // --- Debug copy + move (from 4.9.3b) ---
+  let dbgPosTop = window.matchMedia('(max-width: 950px)').matches;
   if(dbgPosTop) dbgEl.classList.add('top');
-
   function copyDbg(){
-    const t = dbgEl.textContent;
-    if(!t) return;
+    const t = dbgEl.textContent; if(!t) return;
     if(navigator.clipboard && navigator.clipboard.writeText){
-      navigator.clipboard.writeText(t).then(()=>{ flash('디버그 복사됨'); }).catch(()=>{ fallbackCopy(t); });
-    }else{
-      fallbackCopy(t);
-    }
+      navigator.clipboard.writeText(t).then(()=>flash('디버그 복사됨')).catch(()=>fallbackCopy(t));
+    }else fallbackCopy(t);
   }
-  function fallbackCopy(t){
-    try{
-      const ta = document.createElement('textarea');
-      ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
-      flash('디버그 복사됨 (fallback)');
-    }catch{ flash('복사 실패'); }
-  }
-  function flash(msg){
-    const div = document.createElement('div');
-    div.textContent = msg;
-    div.style.cssText = 'position:fixed; top:12px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,.7); color:#fff; padding:6px 10px; border-radius:8px; z-index:2000;';
-    document.body.appendChild(div);
-    setTimeout(()=> div.remove(), 1200);
-  }
-  // Tap to copy
-  dbgEl.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); copyDbg(); });
-  // Double-tap to move top/bottom
-  let lastTap=0;
-  dbgEl.addEventListener('touchend', (e)=>{
-    const now=Date.now();
-    if(now-lastTap<300){
-      dbgPosTop = !dbgPosTop;
-      dbgEl.classList.toggle('top', dbgPosTop);
-    }
-    lastTap = now;
-  }, {passive:false});
+  function fallbackCopy(t){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); flash('디버그 복사됨 (fallback)'); }
+  function flash(msg){ const div=document.createElement('div'); div.textContent=msg; div.style.cssText='position:fixed; top:12px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,.7); color:#fff; padding:6px 10px; border-radius:8px; z-index:2000;'; document.body.appendChild(div); setTimeout(()=>div.remove(),1200); }
+  dbgEl.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); copyDbg(); });
+  let lastTap=0; dbgEl.addEventListener('touchend', e=>{ const now=Date.now(); if(now-lastTap<300){ dbgPosTop=!dbgPosTop; dbgEl.classList.toggle('top', dbgPosTop); } lastTap=now; }, {passive:false});
 
-  // ====== (The rest) – same game logic from v4.9.3 (soft-drop watchdog) ======
-  /* For brevity, we embed the exact v4.9.3 game script here. */
-})();
-</script>
-
-<!-- For actual game logic, include the v4.9.3 file inline -->
-<script>
-/* ==== Begin: v4.9.3 core (identical to previous message) ==== */
-(function(){
-  const dbgEl = document.getElementById('dbg');
-  function dbg(obj){ dbgEl.textContent = JSON.stringify(obj); }
-
+  // ====== BGM & Game – from 4.9.3 (soft-drop watchdog etc.) ======
   const TRACKS = { A:'bgm_A.mp3', B:'bgm_B.mp3', C:'bgm_C.mp3' };
   const order = ['A','B','C'];
   const bgmEl = document.getElementById('bgmAudio');
@@ -195,18 +173,12 @@
       fadeGain.gain.value = 0.0;
       srcNode.connect(volGain).connect(fadeGain).connect(audioCtx.destination);
       return true;
-    }catch(e){ bgmToggle.checked=false; return false; }
+    }catch(e){ console.warn('오디오 초기화 실패', e); return false; }
   }
   function fadeTo(target,dur){ if(!audioCtx||!fadeGain) return; const g=fadeGain.gain, now=audioCtx.currentTime; try{ g.setValueAtTime(g.value,now); g.linearRampToValueAtTime(target, now+Math.max(0,dur||0)); }catch{} }
   function applyLoopInputs(){ loopOn=!!loopEnable.checked; loopStart=parseFloat(loopStartEl.value)||0; loopEnd=parseFloat(loopEndEl.value)||9999; if(loopEnd<=loopStart+0.05){ loopOn=false; } loopRow.classList.toggle('muted', cycleToggle.checked); bgmEl.loop = cycleToggle.checked? false : !loopOn; }
   function setTrack(name){ const url=TRACKS[name]||TRACKS.A; const was=!bgmEl.paused; const out=parseFloat(fadeOutEl.value)||0, inn=parseFloat(fadeInEl.value)||0; if(was) fadeTo(0.0,out); const swap=()=>{ bgmEl.pause(); bgmEl.src=url; bgmEl.currentTime=loopStart||0; bgmEl.load(); if(bgmToggle.checked){ bgmEl.play().then(()=>fadeTo(1.0,inn)).catch(()=>{});} }; if(was&&out>0) setTimeout(swap,out*1000); else swap(); }
   function nextTrack(){ const cur=trackSel.value; const idx=order.indexOf(cur); const n=order[(idx+1)%order.length]; trackSel.value=n; setTrack(n); }
-  bgmEl.addEventListener('ended', ()=>{ if(cycleToggle.checked) nextTrack(); });
-  bgmEl.addEventListener('timeupdate', ()=>{ if(cycleToggle.checked||!loopOn) return; if(bgmEl.currentTime>=loopEnd-0.02){ bgmEl.currentTime=loopStart; if(bgmEl.paused&&bgmToggle.checked){ bgmEl.play().catch(()=>{}); } } });
-  bgmVol.addEventListener('input', ()=>{ userVol=parseFloat(bgmVol.value)||0; if(volGain) volGain.gain.value=userVol; });
-  bgmToggle.addEventListener('change', ()=>{ if(!audioCtx) return; if(bgmToggle.checked){ const inn=parseFloat(fadeInEl.value)||0; bgmEl.play().then(()=>fadeTo(1.0,inn)).catch(()=>{});} else { const out=parseFloat(fadeOutEl.value)||0; fadeTo(0.0,out); setTimeout(()=>bgmEl.pause(), out*1000);} });
-  trackSel.addEventListener('change', ()=> setTrack(trackSel.value));
-  testFadeBtn.addEventListener('click', ()=>{ const out=parseFloat(fadeOutEl.value)||0, inn=parseFloat(fadeInEl.value)||0; fadeTo(0.0,out); setTimeout(()=>{ if(bgmEl.paused) bgmEl.play().catch(()=>{}); fadeTo(1.0,inn); }, Math.max(1,out*1000+200)); });
   cycleToggle.addEventListener('change', applyLoopInputs);
   loopEnable.addEventListener('change', applyLoopInputs);
   loopStartEl.addEventListener('input', applyLoopInputs);
@@ -214,18 +186,10 @@
   setStartBtn.addEventListener('click', ()=>{ loopStartEl.value=bgmEl.currentTime.toFixed(2); applyLoopInputs(); });
   setEndBtn.addEventListener('click', ()=>{ loopEndEl.value=bgmEl.currentTime.toFixed(2); applyLoopInputs(); });
 
-  // ====== Game (iOS soft-drop watchdog) ======
+  // Game core
   const COLS=10, ROWS=20, SIZE=32;
   const COLORS={ I:'#67e8f9', J:'#60a5fa', L:'#f59e0b', O:'#fef08a', S:'#34d399', T:'#c084fc', Z:'#f87171', X:'#0b0d12' };
-  const SHAPES={
-    I:[[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
-    J:[[1,0,0],[1,1,1],[0,0,0]],
-    L:[[0,0,1],[1,1,1],[0,0,0]],
-    O:[[1,1],[1,1]],
-    S:[[0,1,1],[1,1,0],[0,0,0]],
-    Z:[[1,1,0],[0,1,1],[0,0,0]],
-    T:[[0,1,0],[1,1,1],[0,0,0]]
-  };
+  const SHAPES={ I:[[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]], J:[[1,0,0],[1,1,1],[0,0,0]], L:[[0,0,1],[1,1,1],[0,0,0]], O:[[1,1],[1,1]], S:[[0,1,1],[1,1,0],[0,0,0]], Z:[[1,1,0],[0,1,1],[0,0,0]], T:[[0,1,0],[1,1,1],[0,0,0]] };
   const TYPES=['I','J','L','O','S','T','Z'];
   let prevType=null; function pickType(){ const roll=()=>TYPES[(Math.random()*TYPES.length)|0]; let t=roll(); if(prevType&&t===prevType) t=roll(); prevType=t; return t; }
   const GFRAMES={ 0:48,1:43,2:38,3:33,4:28,5:23,6:18,7:13,8:8,9:6,10:5,11:5,12:5,13:4,14:4,15:4,16:3,17:3,18:3,19:2,20:2,21:2,22:2,23:2,24:2,25:2,26:2,27:2,28:2,29:1 };
@@ -233,7 +197,6 @@
 
   const canvas=document.getElementById('game'); const ctx=canvas.getContext('2d'); ctx.imageSmoothingEnabled=false;
   let board=makeBoard(); let current=null; let nextType=pickType(); let dropInterval=gravityMsForLevel(0); let lastTime=0; let acc=0; let running=false; let lines=0, level=0;
-
   const dasEl=document.getElementById('dasMs'), arrEl=document.getElementById('arrMs'), softEl=document.getElementById('softMs');
   let dasMs=parseFloat(dasEl.value)||130, arrMs=parseFloat(arrEl.value)||50, softMs=parseFloat(softEl.value)||50;
   dasEl.addEventListener('input', ()=> dasMs=Math.max(0,parseFloat(dasEl.value)||0));
@@ -245,10 +208,96 @@
   let hDir=null; let nextHMoveAt=0, nextSoftAt=0;
   let lastY=null, lastSoftAdvanceAt=0;
 
+  function tryMove(dx,dy){ const nx=current.x+dx, ny=current.y+(dy||0); if(!collides(current,nx,ny)){ current.x=nx; current.y=ny; return true; } return false; }
+  function collides(piece,nx,ny,nm){ const m=nm||piece.m; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(!m[y][x]) continue; const bx=nx+x, by=ny+y; if(bx<0||bx>=COLS||by>=ROWS) return true; if(by>=0 && board[by][bx]) return true; } return false; }
+  function rotateCW(m){ const h=m.length,w=m[0].length; const out=[]; for(let x=0;x<w;x++){ const row=[]; for(let y=h-1;y>=0;y--){ row.push(m[y][x]); } out.push(row);} return out; }
+  function rotate(){ let nm=rotateCW(current.m); if(!collides(current,current.x,current.y,nm)) current.m=nm; }
+  function makeBoard(){ const b=[]; for(let r=0;r<ROWS;r++) b[r]=new Array(COLS).fill(null); return b; }
+  function getShape(t){ return SHAPES[t].map(r=>r.slice()); }
+  function spawn(){ const t=nextType; nextType=pickType(); current={ t, m:getShape(t), x:(COLS/2|0)-2, y:-2 }; lastY=current.y; if(collides(current,current.x,current.y)){ gameOver(); } }
+  function hardDrop(){ while(tryMove(0,1)){} lock(); }
+  function softStep(){ if(!tryMove(0,1)) lock(); }
+  function lock(){ const m=current.m; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(!m[y][x]) continue; const bx=current.x+x, by=current.y+y; if(by>=0) board[by][bx]=current.t; } clearLines(); spawn(); }
+  function clearLines(){ let cleared=0; for(let r=ROWS-1;r>=0;r--){ if(board[r].every(v=>!!v)){ board.splice(r,1); board.unshift(new Array(COLS).fill(null)); cleared++; r++; } } if(cleared>0){ if((lines+=cleared) >= (level+1)*10){ level++; dropInterval=gravityMsForLevel(level); } } }
+
   function setLeft(v){ if(v){ input.left=true; input.right=false; } else input.left=false; }
   function setRight(v){ if(v){ input.right=true; input.left=false; } else input.right=false; }
   function setDown(v){ input.down=!!v; if(!v){ const now=performance.now(); nextSoftAt = now + softMs; } }
 
+  function handleHorizontal(now){
+    if(taps.left>0){ tryMove(-1,0); taps.left=0; hDir='L'; nextHMoveAt=now+dasMs; }
+    else if(taps.right>0){ tryMove(1,0); taps.right=0; hDir='R'; nextHMoveAt=now+dasMs; }
+    const want=input.left?'L':input.right?'R':null;
+    if(!want){ hDir=null; return; }
+    if(want!==hDir){ hDir=want; tryMove(hDir==='L'?-1:1,0); nextHMoveAt=now+dasMs; return; }
+    while(now>=nextHMoveAt){ if(!tryMove(hDir==='L'?-1:1,0)) break; nextHMoveAt+=arrMs; if(arrMs<=0) break; }
+  }
+  function validTime(t){ return Number.isFinite(t) && t<=1e13; }
+  function handleSoft(now){
+    if(!input.down){ nextSoftAt = now + softMs; lastSoftAdvanceAt = now; return; }
+    if(!validTime(nextSoftAt)){ nextSoftAt = now + softMs; }
+    while(now>=nextSoftAt){
+      if(!tryMove(0,1)){ lock(); lastSoftAdvanceAt = now; break; }
+      lastSoftAdvanceAt = now; nextSoftAt += softMs; if(softMs<=0) break;
+    }
+    if(input.down){
+      if(lastY===null) lastY=current.y;
+      if(current.y===lastY && (now - lastSoftAdvanceAt) > Math.max(150, softMs*3)){
+        if(tryMove(0,1)){ lastSoftAdvanceAt = now; nextSoftAt = now + softMs; }
+      }
+    }
+    lastY = current.y;
+  }
+  function update(dt){
+    if(!running){ return; }
+    if(!current){ spawn(); }
+    acc += dt; const now=performance.now();
+    handleHorizontal(now); handleSoft(now);
+    if(acc>=dropInterval){
+      if(!input.down || (now - lastSoftAdvanceAt) > Math.max(300, softMs*4)){
+        if(!tryMove(0,1)) lock();
+      }
+      acc=0;
+    }
+    dbg({running, y:current?current.y:null, down:input.down});
+  }
+  function drawCell(c,x,y,s,color){ c.fillStyle=color; c.fillRect(x,y,s,s); c.strokeStyle='rgba(0,0,0,0.35)'; c.lineWidth=2; c.strokeRect(x+1,y+1,s-2,s-2); c.strokeStyle='rgba(255,255,255,0.12)'; c.lineWidth=2; c.strokeRect(x+0.5,y+0.5,s-1,s-1); }
+  function render(){ const rect=document.getElementById('stage').getBoundingClientRect(); const wScale=Math.floor(rect.width/(COLS*SIZE)), hScale=Math.floor(rect.height/(ROWS*SIZE)), scale=Math.max(1, Math.min(wScale,hScale)); canvas.style.width=(COLS*SIZE*scale)+'px'; canvas.style.height=(ROWS*SIZE*scale)+'px'; ctx.clearRect(0,0,canvas.width,canvas.height); for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){ const t=board[y][x]; drawCell(ctx,x*SIZE,y*SIZE,SIZE,t?COLORS[t]:COLORS.X); } if(current){ const m=current.m, color=COLORS[current.t]; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(m[y][x]) drawCell(ctx,(current.x+x)*SIZE,(current.y+y)*SIZE,SIZE,color); } } }
+  function loop(ts){ requestAnimationFrame(loop); render(); update(ts - (window.__last||ts)); window.__last = ts; }
+  function gameOver(){ running=false; resetGame(true); }
+  function resetGame(keepOverlay){ board=makeBoard(); current=null; nextType=pickType(); dropInterval=gravityMsForLevel(level=0); lastTime=0; acc=0; lines=0; if(!keepOverlay){ overlay.classList.remove('hidden'); startFab.classList.remove('hidden'); } }
+
+  // Start function (global fallback)
+  async function __startGame(startAudio=true){
+    // Try audio init but don't block game
+    if(startAudio){
+      const ok = await initAudio();
+      applyLoopInputs();
+      setTrack(trackSel.value);
+      if(!ok){
+        console.warn('오디오 권한/초기화 실패 – 게임은 무음으로 시작');
+      }
+    }
+    overlay.classList.add('hidden');
+    startFab.classList.add('hidden');
+    if(current==null) spawn();
+    running = true;
+    requestAnimationFrame(loop);
+    document.getElementById('game').focus({preventScroll:true});
+  }
+  window.__startGameFromUI = __startGame;
+
+  // Binders for various start entry points
+  document.getElementById('startBtn').addEventListener('click', ()=> __startGame(true));
+  document.getElementById('startNoAudioBtn').addEventListener('click', ()=> __startGame(false));
+  startFab.addEventListener('click', ()=> __startGame(true));
+  // Pointerup fallback (iOS sometimes swallows click)
+  document.getElementById('startBtn').addEventListener('pointerup', ()=> __startGame(true));
+  document.getElementById('startNoAudioBtn').addEventListener('pointerup', ()=> __startGame(false));
+  // Enter key to start
+  window.addEventListener('keydown', (e)=>{ if(overlay && !overlay.classList.contains('hidden') && (e.key==='Enter' || e.key===' ')){ e.preventDefault(); __startGame(true); } }, true);
+
+  // Controls binding
   function bindHold(btn, onPress, onRelease){
     btn.addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); try{ btn.setPointerCapture(e.pointerId);}catch{} onPress(); });
     const end = e=>{ e.preventDefault(); onRelease && onRelease(); };
@@ -260,9 +309,10 @@
   bindHold(document.getElementById('mLeft'), ()=>{ taps.left++; setLeft(true); }, ()=> setLeft(false));
   bindHold(document.getElementById('mRight'), ()=>{ taps.right++; setRight(true); }, ()=> setRight(false));
   bindHold(document.getElementById('mSoft'), ()=> setDown(true), ()=> setDown(false));
-  document.getElementById('mRotate').addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); rotate(); nextSoftAt = Math.min(nextSoftAt, performance.now()+softMs); });
+  document.getElementById('mRotate').addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); rotate(); });
   document.getElementById('mHard').addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); hardDrop(); });
 
+  // Keyboard
   const lockKeysEl=document.getElementById('lockKeys');
   const enableHardDropEl=document.getElementById('enableHardDrop');
   window.addEventListener('keydown', (e)=>{
@@ -272,106 +322,13 @@
     if(k==='ArrowLeft'){ taps.left++; setLeft(true); }
     else if(k==='ArrowRight'){ taps.right++; setRight(true); }
     else if(k==='ArrowDown'){ setDown(true); }
-    else if(k==='ArrowUp'||k==='x'||k==='X'){ rotate(); nextSoftAt = Math.min(nextSoftAt, performance.now()+softMs); }
+    else if(k==='ArrowUp'||k==='x'||k==='X'){ rotate(); }
     else if(k===' ' && enableHardDropEl.checked){ hardDrop(); }
     else if(k==='p'||k==='P'){ running=!running; }
     else if(k==='r'||k==='R'){ resetGame(); }
   }, true);
   window.addEventListener('keyup', (e)=>{ const k=e.key; if(k==='ArrowLeft') setLeft(false); else if(k==='ArrowRight') setRight(false); else if(k==='ArrowDown') setDown(false); }, true);
-
-  function focusGame(){ canvas.focus({preventScroll:true}); }
-  function makeBoard(){ const b=[]; for(let r=0;r<ROWS;r++) b[r]=new Array(COLS).fill(null); return b; }
-  function clone(m){ return m.map(row=>row.slice()); }
-  function rotateCW(m){ const h=m.length,w=m[0].length; const out=[]; for(let x=0;x<w;x++){ const row=[]; for(let y=h-1;y>=0;y--){ row.push(m[y][x]); } out.push(row);} return out; }
-  function getShape(t){ return clone(SHAPES[t]); }
-
-  function spawn(){ const t=nextType; nextType=pickType(); current={ t, m:getShape(t), x:(COLS/2|0)-2, y:-2 }; lastY=current.y; if(collides(current,current.x,current.y)){ gameOver(); } }
-  function collides(piece,nx,ny,nm){ const m=nm||piece.m; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(!m[y][x]) continue; const bx=nx+x, by=ny+y; if(bx<0||bx>=COLS||by>=ROWS) return true; if(by>=0 && board[by][bx]) return true; } return false; }
-  function tryMove(dx,dy){ const nx=current.x+dx, ny=current.y+(dy||0); if(!collides(current,nx,ny)){ current.x=nx; current.y=ny; return true; } return false; }
-  function rotate(){ let nm=rotateCW(current.m); if(!collides(current,current.x,current.y,nm)) current.m=nm; }
-  function softStep(){ if(!tryMove(0,1)) lock(); }
-  function hardDrop(){ while(tryMove(0,1)){} lock(); }
-  function lock(){ const m=current.m; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(!m[y][x]) continue; const bx=current.x+x, by=current.y+y; if(by>=0) board[by][bx]=current.t; } clearLines(); spawn(); }
-  function clearLines(){ let cleared=0; for(let r=ROWS-1;r>=0;r--){ if(board[r].every(v=>!!v)){ board.splice(r,1); board.unshift(new Array(COLS).fill(null)); cleared++; r++; } } if(cleared>0){ if((lines+=cleared) >= (level+1)*10){ level++; dropInterval=gravityMsForLevel(level); } } }
-
-  function handleHorizontal(now){
-    if(taps.left>0){ tryMove(-1,0); taps.left=0; hDir='L'; nextHMoveAt=now+dasMs; }
-    else if(taps.right>0){ tryMove(1,0); taps.right=0; hDir='R'; nextHMoveAt=now+dasMs; }
-    const want=input.left?'L':input.right?'R':null;
-    if(!want){ hDir=null; return; }
-    if(want!==hDir){ hDir=want; tryMove(hDir==='L'?-1:1,0); nextHMoveAt=now+dasMs; return; }
-    while(now>=nextHMoveAt){ if(!tryMove(hDir==='L'?-1:1,0)) break; nextHMoveAt+=arrMs; if(arrMs<=0) break; }
-  }
-
-  function validTime(t){ return Number.isFinite(t) && t<=1e13; }
-  let nextSoftAt=0, lastSoftAdvanceAt=0, lastY=null;
-  function handleSoft(now){
-    if(!input.down){
-      nextSoftAt = now + softMs;
-      lastSoftAdvanceAt = now;
-      return;
-    }
-    if(!validTime(nextSoftAt)){ nextSoftAt = now + softMs; }
-    while(now>=nextSoftAt){
-      if(!tryMove(0,1)){ lock(); lastSoftAdvanceAt = now; break; }
-      lastSoftAdvanceAt = now;
-      nextSoftAt += softMs;
-      if(softMs<=0) break;
-    }
-    if(input.down){
-      if(lastY===null) lastY=current.y;
-      if(current.y===lastY && (now - lastSoftAdvanceAt) > Math.max(150, softMs*3)){
-        if(tryMove(0,1)){
-          lastSoftAdvanceAt = now;
-          nextSoftAt = now + softMs;
-        }
-      }
-    }
-    lastY = current.y;
-  }
-
-  function update(dt){
-    if(!running){ return; }
-    if(!current){ spawn(); }
-    acc += dt;
-    const now=performance.now();
-    handleHorizontal(now);
-    handleSoft(now);
-    if(acc>=dropInterval){
-      if(!input.down || (now - lastSoftAdvanceAt) > Math.max(300, softMs*4)){
-        if(!tryMove(0,1)) lock();
-      }
-      acc=0;
-    }
-    dbg({y:current?current.y:null, down:input.down, nextSoftAt:Math.round(nextSoftAt), now:Math.round(now)});
-  }
-
-  function render(){
-    const COLS=10, ROWS=20, SIZE=32;
-    const rect=document.getElementById('stage').getBoundingClientRect();
-    const wScale=Math.floor(rect.width/(COLS*SIZE)), hScale=Math.floor(rect.height/(ROWS*SIZE)), scale=Math.max(1, Math.min(wScale,hScale));
-    const ctx=document.getElementById('game').getContext('2d'); ctx.imageSmoothingEnabled=false;
-    const canvas=document.getElementById('game');
-    canvas.style.width=(COLS*SIZE*scale)+'px'; canvas.style.height=(ROWS*SIZE*scale)+'px';
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){ const t=board[y][x]; drawCell(ctx,x*SIZE,y*SIZE,SIZE,t?COLORS[t]:COLORS.X); }
-    if(current){ const m=current.m, color=COLORS[current.t]; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(m[y][x]) drawCell(ctx,(current.x+x)*SIZE,(current.y+y)*SIZE,SIZE,color); } }
-  }
-  function drawCell(c,x,y,s,color){ c.fillStyle=color; c.fillRect(x,y,s,s); c.strokeStyle='rgba(0,0,0,0.35)'; c.lineWidth=2; c.strokeRect(x+1,y+1,s-2,s-2); c.strokeStyle='rgba(255,255,255,0.12)'; c.lineWidth=2; c.strokeRect(x+0.5,y+0.5,s-1,s-1); }
-
-  function loop(ts){ requestAnimationFrame(loop); render(); update(ts - (window.__last||ts)); window.__last = ts; }
-
-  const overlay=document.getElementById('overlay');
-  document.getElementById('startBtn').addEventListener('click', async ()=>{
-    await initAudio(); applyLoopInputs(); setTrack(trackSel.value);
-    overlay.classList.add('hidden'); document.getElementById('game').focus({preventScroll:true}); if(current==null) spawn(); running=true; requestAnimationFrame(loop);
-  });
-  document.getElementById('btnPause').addEventListener('click', ()=>{ running=!running; if(running) document.getElementById('game').focus({preventScroll:true}); });
-  document.getElementById('btnReset').addEventListener('click', ()=>{ board=makeBoard(); current=null; nextType=pickType(); dropInterval=gravityMsForLevel(level=0); lastTime=0; acc=0; lines=0; overlay.classList.remove('hidden'); });
-
-  function makeBoard(){ const b=[]; for(let r=0;r<20;r++) b[r]=new Array(10).fill(null); return b; }
 })();
-/* ==== End: v4.9.3 core ==== */
 </script>
 </body>
 </html>
