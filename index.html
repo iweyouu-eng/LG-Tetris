@@ -2,20 +2,20 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Tetris (NES 룰) + BGM v4.4</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Tetris (NES 룰) + BGM v4.6 (Mobile)</title>
 <style>
-  :root { --bg:#0f1115; --panel:rgba(255,255,255,0.06); --accent:#7dd3fc; }
+  :root { --bg:#0f1115; --panel:rgba(255,255,255,0.06); --accent:#7dd3fc; --btn:#1f2937; --btnBorder:rgba(255,255,255,.18); }
   html, body { margin:0; padding:0; height:100%; background:linear-gradient(180deg,#0f1115,#0b0d11); color:#e5e7eb; font:14px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Pretendard,Apple SD Gothic Neo,Malgun Gothic,Arial,sans-serif; }
-  .wrap { max-width:1100px; margin:0 auto; padding:10px; display:grid; grid-template-columns: 1fr; gap:10px; }
-  @media (min-width: 950px){ .wrap { grid-template-columns: 0.9fr 1.1fr; } }
+  .wrap { max-width:1100px; margin:0 auto; padding:10px; display:grid; grid-template-columns: 1fr; gap:10px; padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
+  @media (min-width: 950px){ .wrap { grid-template-columns: 0.9fr 1.1fr; padding-bottom: 10px; } }
   .card { background: var(--panel); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:10px; }
-  #stage { position:relative; display:flex; justify-content:center; align-items:center; min-height:60vh; }
-  #game { background:#111; border:1px solid rgba(255,255,255,.1); border-radius:8px; image-rendering: pixelated; outline:none; }
+  #stage { position:relative; display:flex; justify-content:center; align-items:center; min-height:60vh; touch-action: none; }
+  #game { background:#111; border:1px solid rgba(255,255,255,.1); border-radius:8px; image-rendering: pixelated; outline:none; touch-action: none; }
   #overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.55); border-radius:10px; }
   #overlay.hidden { display:none; }
   #overlay .box { text-align:center; }
-  .btn { background:#1f2937; color:#fff; border:1px solid rgba(255,255,255,.18); border-radius:10px; padding:10px 12px; cursor:pointer; }
+  .btn { background:var(--btn); color:#fff; border:1px solid var(--btnBorder); border-radius:12px; padding:10px 12px; cursor:pointer; }
   .btn:disabled{ opacity:.5; cursor:not-allowed; }
   #stats { display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:8px; }
   .stat { background:rgba(0,0,0,0.35); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,.08); }
@@ -24,15 +24,40 @@
   .note { font-size:12px; color:#cbd5e1; }
   .grid { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:6px; margin-top:8px; }
   .kbd { background:#0b1220; border:1px solid rgba(255,255,255,.15); padding:6px 8px; border-radius:8px; font-size:12px; }
-  #pad { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-top:8px; }
-  #pad .btn { padding:12px; }
-  @media (min-width: 900px){ #pad { display:none; } }
+  #pad { display:none; }
   #err { position:fixed; left:10px; bottom:10px; background:#c00; color:#fff; padding:8px 10px; border-radius:8px; font-size:12px; z-index:9999; white-space:pre-wrap; display:none; }
   #dbg { position:fixed; right:10px; bottom:10px; font-size:11px; color:#9ca3af; }
   .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:6px 0; }
   .sep { width:1px; height:20px; background:rgba(255,255,255,.15); display:inline-block; }
   input[type="number"] { width:80px; }
   label small { opacity:.8; }
+
+  /* Mobile Controls Overlay */
+  #mobileControls {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    padding: 8px calc(12px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
+    display: flex; justify-content: space-between; align-items: flex-end;
+    z-index: 999;
+    pointer-events: none; /* container ignores, buttons enable */
+  }
+  .cluster {
+    display:flex; gap:10px; pointer-events: auto;
+  }
+  .cluster.left .mbtn { width:64px; height:64px; font-size:22px; }
+  .cluster.right .mbtn { width:64px; height:64px; font-size:22px; }
+  .mbtn {
+    background: var(--btn);
+    border: 1px solid var(--btnBorder);
+    color: #fff; border-radius:16px;
+    display:flex; align-items:center; justify-content:center;
+    user-select:none; -webkit-user-select:none;
+    touch-action: manipulation;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+  }
+  .mbtn:active { transform: translateY(1px); }
+  .hidden { display:none !important; }
+  .muted { opacity:.55; pointer-events:none; }
 </style>
 </head>
 <body>
@@ -48,7 +73,7 @@
         <button id="startBtn" class="btn">▶ 시작</button>
       </div>
     </div>
-    <audio id="bgmAudio" preload="auto" loop></audio>
+    <audio id="bgmAudio" preload="auto"></audio>
   </div>
   <div class="card">
     <div class="controls">
@@ -67,12 +92,15 @@
         <label>볼륨 <input id="bgmVol" type="range" min="0" max="1" step="0.01" value="0.6" style="width:120px;"></label>
       </div>
       <div class="row">
-        <label>Loop 사용 <input type="checkbox" id="loopEnable"></label>
-        <label>시작(s) <input type="number" id="loopStart" value="0" step="0.1"></label>
-        <label>끝(s) <input type="number" id="loopEnd" value="9999" step="0.1"></label>
-        <button id="setStart" class="btn">현재→시작</button>
-        <button id="setEnd" class="btn">현재→끝</button>
-        <span><small>※ 체크 해제 시 전체 트랙이 무한 반복됩니다.</small></span>
+        <label><input type="checkbox" id="cycleABC" checked> ABC 자동 순환</label>
+        <span class="sep"></span>
+        <span id="loopRow">
+          <label>Loop 사용 <input type="checkbox" id="loopEnable"></label>
+          <label>시작(s) <input type="number" id="loopStart" value="0" step="0.1"></label>
+          <label>끝(s) <input type="number" id="loopEnd" value="9999" step="0.1"></label>
+          <button id="setStart" class="btn">현재→시작</button>
+          <button id="setEnd" class="btn">현재→끝</button>
+        </span>
       </div>
       <div class="row">
         <label>Fade In(s) <input type="number" id="fadeIn" value="1.0" min="0" max="10" step="0.1"></label>
@@ -82,6 +110,8 @@
       <div class="row">
         <label><input type="checkbox" id="lockKeys" checked> 키 입력을 게임에 고정</label>
         <label><input type="checkbox" id="enableHardDrop"> Space=하드드롭(옵션)</label>
+        <label><input type="checkbox" id="showMobile" checked> 모바일 컨트롤 표시</label>
+        <label><input type="checkbox" id="enableGestures" checked> 제스처(스와이프/탭)</label>
       </div>
     </div>
     <div id="stats" style="margin-top:8px;">
@@ -90,21 +120,19 @@
       <div class="stat">라인<br><span id="lines" class="strong">0</span></div>
       <div class="stat">다음<br><canvas id="next" width="96" height="96" style="background:#0b0b0b;border-radius:8px;border:1px solid rgba(255,255,255,.1)"></canvas></div>
     </div>
+  </div>
+</div>
 
-    <div style="margin-top:10px;">
-      <div class="grid">
-        <div><span class="kbd">←/→</span> 이동</div>
-        <div><span class="kbd">↑</span> 회전</div>
-        <div><span class="kbd">↓</span> 소프트 드롭(+1점/칸)</div>
-        <div><span class="kbd">Space</span> (옵션) 하드드롭</div>
-      </div>
-      <div id="pad">
-        <button class="btn" id="padLeft">←</button>
-        <button class="btn" id="padRotate">⟳</button>
-        <button class="btn" id="padRight">→</button>
-        <button class="btn" id="padDropSoft" style="grid-column: span 3;">↓ 소프트</button>
-      </div>
-    </div>
+<!-- Mobile Controls (fixed bottom) -->
+<div id="mobileControls">
+  <div class="cluster left">
+    <div class="mbtn" id="mLeft" title="Left">◀</div>
+    <div class="mbtn" id="mRight" title="Right">▶</div>
+  </div>
+  <div class="cluster right">
+    <div class="mbtn" id="mRotate" title="Rotate">⟳</div>
+    <div class="mbtn" id="mSoft" title="Soft Drop">↓</div>
+    <div class="mbtn" id="mHard" title="Hard Drop">⤓</div>
   </div>
 </div>
 
@@ -116,12 +144,18 @@
   window.addEventListener('error', e => toast('에러: ' + (e.message||e.toString())));
   window.addEventListener('unhandledrejection', e => toast('Promise 에러: ' + ((e.reason&&(e.reason.message||e.reason.toString()))||'unknown')));
 
-  // ---------- BGM with WebAudio ----------
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints>0);
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+
+  // ---------- BGM with WebAudio & ABC cycle ----------
   const TRACKS = { A:'bgm_A.mp3', B:'bgm_B.mp3', C:'bgm_C.mp3' };
+  const order = ['A','B','C'];
   const bgmEl = document.getElementById('bgmAudio');
   const trackSel = document.getElementById('trackSel');
   const bgmToggle = document.getElementById('bgmToggle');
   const bgmVol = document.getElementById('bgmVol');
+  const cycleToggle = document.getElementById('cycleABC');
+  const loopRow = document.getElementById('loopRow');
   const loopEnable = document.getElementById('loopEnable');
   const loopStartEl = document.getElementById('loopStart');
   const loopEndEl = document.getElementById('loopEnd');
@@ -130,6 +164,8 @@
   const fadeInEl = document.getElementById('fadeIn');
   const fadeOutEl = document.getElementById('fadeOut');
   const testFadeBtn = document.getElementById('testFade');
+  const showMobileEl = document.getElementById('showMobile');
+  const gesturesEl = document.getElementById('enableGestures');
 
   let audioCtx = null, srcNode = null, volGain = null, fadeGain = null;
   let loopStart = 0, loopEnd = 9999, loopOn = false;
@@ -169,7 +205,16 @@
     loopStart = parseFloat(loopStartEl.value)||0;
     loopEnd = parseFloat(loopEndEl.value)||9999;
     if(loopEnd <= loopStart + 0.05){ loopOn=false; }
-    bgmEl.loop = !loopOn; // 기본: 전체 트랙 무한반복
+    updateLoopFlags();
+  }
+
+  function updateLoopFlags(){
+    if(cycleToggle.checked){
+      bgmEl.loop = false; // cycle mode: play once then 'ended' -> nextTrack
+    } else {
+      bgmEl.loop = !loopOn; // normal: full track infinite if range OFF
+    }
+    loopRow.classList.toggle('muted', cycleToggle.checked);
   }
 
   function setTrack(name){
@@ -191,12 +236,18 @@
     else doSwap();
   }
 
-  bgmEl.addEventListener('error', ()=>{
-    toast('BGM 로드 실패: '+ (bgmEl.src||''));
-  });
+  function nextTrack(){
+    const cur = trackSel.value;
+    const idx = order.indexOf(cur);
+    const next = order[(idx+1) % order.length];
+    trackSel.value = next;
+    setTrack(next);
+  }
 
-  // 커스텀 루프 범위
+  bgmEl.addEventListener('error', ()=>{ toast('BGM 로드 실패: '+ (bgmEl.src||'')); });
+  bgmEl.addEventListener('ended', ()=>{ if(cycleToggle.checked){ nextTrack(); } });
   bgmEl.addEventListener('timeupdate', ()=>{
+    if(cycleToggle.checked) return;
     if(!loopOn) return;
     if(bgmEl.currentTime >= loopEnd - 0.02){
       bgmEl.currentTime = loopStart;
@@ -204,10 +255,7 @@
     }
   });
 
-  bgmVol.addEventListener('input', ()=>{
-    userVol = parseFloat(bgmVol.value)||0;
-    if(volGain) volGain.gain.value = userVol;
-  });
+  bgmVol.addEventListener('input', ()=>{ userVol = parseFloat(bgmVol.value)||0; if(volGain) volGain.gain.value = userVol; });
   bgmToggle.addEventListener('change', ()=>{
     if(!audioCtx) return;
     if(bgmToggle.checked){
@@ -224,11 +272,9 @@
     const outDur = parseFloat(fadeOutEl.value)||0;
     const inDur = parseFloat(fadeInEl.value)||0;
     fadeTo(0.0, outDur);
-    setTimeout(()=>{
-      if(bgmEl.paused) bgmEl.play().catch(()=>{});
-      fadeTo(1.0, inDur);
-    }, Math.max(1, outDur*1000 + 200));
+    setTimeout(()=>{ if(bgmEl.paused) bgmEl.play().catch(()=>{}); fadeTo(1.0, inDur); }, Math.max(1, outDur*1000 + 200));
   });
+  cycleToggle.addEventListener('change', ()=>{ applyLoopInputs(); });
 
   loopEnable.addEventListener('change', applyLoopInputs);
   loopStartEl.addEventListener('input', applyLoopInputs);
@@ -251,13 +297,7 @@
   const TYPES = ['I','J','L','O','S','T','Z'];
 
   let prevType = null;
-  function pickType(){
-    const roll = ()=> TYPES[(Math.random()*TYPES.length)|0];
-    let t = roll();
-    if(prevType && t===prevType) t = roll();
-    prevType = t;
-    return t;
-  }
+  function pickType(){ const roll = ()=> TYPES[(Math.random()*TYPES.length)|0]; let t = roll(); if(prevType && t===prevType) t = roll(); prevType = t; return t; }
 
   const GFRAMES = { 0:48,1:43,2:38,3:33,4:28,5:23,6:18,7:13,8:8,9:6, 10:5,11:5,12:5,13:4,14:4,15:4,16:3,17:3,18:3,19:2, 20:2,21:2,22:2,23:2,24:2,25:2,26:2,27:2,28:2,29:1 };
   function gravityMsForLevel(lv){ const frames = GFRAMES[Math.min(29, lv)] ?? 48; return Math.max(16, frames*(1000/60)); }
@@ -279,7 +319,7 @@
   const overlay = document.getElementById('overlay');
   document.getElementById('startBtn').addEventListener('click', async ()=>{
     const ok = await initAudio(); 
-    applyLoopInputs(); // default: element.loop = true (infinite)
+    applyLoopInputs();
     setTrack(trackSel.value); 
     if(ok) fadeTo(1.0, parseFloat(fadeInEl.value)||0);
     overlay.classList.add('hidden');
@@ -293,11 +333,41 @@
   });
   document.getElementById('btnReset').addEventListener('click', ()=>{ resetGame(); focusGame(); });
 
-  document.getElementById('padLeft').addEventListener('click', ()=> tryMove(-1,0));
-  document.getElementById('padRight').addEventListener('click', ()=> tryMove(1,0));
-  document.getElementById('padRotate').addEventListener('click', ()=> rotate());
-  document.getElementById('padDropSoft').addEventListener('click', ()=> softDrop());
+  // On-screen Mobile Buttons (with DAS/ARR)
+  const mLeft = document.getElementById('mLeft');
+  const mRight = document.getElementById('mRight');
+  const mRotate = document.getElementById('mRotate');
+  const mSoft = document.getElementById('mSoft');
+  const mHard = document.getElementById('mHard');
+  const mobileControls = document.getElementById('mobileControls');
+  const showMobile = document.getElementById('showMobile');
 
+  function holdRepeat(el, fire, das=130, arr=50){
+    let t1=null, t2=null;
+    const start=(e)=>{ e.preventDefault(); e.stopPropagation(); fire(); t1=setTimeout(()=>{ t2=setInterval(fire, arr); }, das); el.setPointerCapture && el.setPointerCapture(e.pointerId); };
+    const end=(e)=>{ clearTimeout(t1); clearInterval(t2); t1=t2=null; };
+    ['pointerdown'].forEach(ev=> el.addEventListener(ev, start));
+    ['pointerup','pointercancel','pointerleave'].forEach(ev=> el.addEventListener(ev, end));
+    el.addEventListener('contextmenu', e=> e.preventDefault());
+  }
+  holdRepeat(mLeft, ()=>{ if(running) tryMove(-1,0); });
+  holdRepeat(mRight, ()=>{ if(running) tryMove(1,0); });
+  holdRepeat(mSoft, ()=>{ if(running) softDrop(); }, 0, 50);
+  mRotate.addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); if(running) rotate(); });
+  mHard.addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); if(running) hardDrop(); });
+
+  // Show/hide mobile controls
+  function refreshMobileControls(){
+    const show = showMobile.checked;
+    mobileControls.classList.toggle('hidden', !show);
+  }
+  showMobile.addEventListener('change', refreshMobileControls);
+
+  // Auto default: show on touch devices, hide on large desktop
+  if(isTouch) showMobile.checked = true; else showMobile.checked = false;
+  refreshMobileControls();
+
+  // Focus canvas when touching the stage
   document.getElementById('stage').addEventListener('pointerdown', ()=> focusGame());
 
   const lockKeysEl = document.getElementById('lockKeys');
@@ -318,6 +388,69 @@
       e.preventDefault(); routeGameKey(e);
     }
   }, true);
+
+  // Gestures on canvas: tap=rotate, swipe L/R=move, swipe down=hard drop, swipe up=rotate (alt)
+  let gStart=null;
+  const gestureMin=16; // px
+  if(gesturesEl) gesturesEl.addEventListener('change', ()=>{});
+
+  canvas.addEventListener('pointerdown', (e)=>{
+    if(!gesturesEl.checked) return;
+    if(e.pointerType!=='touch' && !isTouch) return;
+    gStart = { x:e.clientX, y:e.clientY, t:performance.now(), moved:false };
+  });
+  canvas.addEventListener('pointermove', (e)=>{
+    if(!gStart || !gesturesEl.checked) return;
+    const dx = e.clientX - gStart.x, dy = e.clientY - gStart.y;
+    if(Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > gestureMin){
+      // horizontal move, repeat per threshold
+      const step = Math.trunc(dx / 24);
+      if(step!==0){
+        const sign = step>0 ? 1 : -1;
+        for(let i=0;i<Math.abs(step);i++) tryMove(sign,0);
+        gStart.x = e.clientX; // reset to allow continuous stepping
+        gStart.moved = true;
+      }
+    }else if(Math.abs(dy) > 36){
+      // vertical: hint drop preview, no-op here
+      gStart.moved = true;
+    }
+  });
+  canvas.addEventListener('pointerup', (e)=>{
+    if(!gesturesEl.checked) return;
+    if(!gStart){ return; }
+    const dx = e.clientX - gStart.x0 || 0; // gStart.x0 undefined; fix below
+  });
+
+  // fix: we need original position for end evaluation; rebind properly
+  canvas.addEventListener('pointerdown', (e)=>{
+    if(!gesturesEl.checked) return;
+    if(e.pointerType!=='touch' && !isTouch) return;
+    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+    gStart = { x:e.clientX, y:e.clientY, x0:e.clientX, y0:e.clientY, t:performance.now(), moved:false };
+  }, {capture:true});
+
+  canvas.addEventListener('pointerup', (e)=>{
+    if(!gesturesEl.checked) return;
+    const st = gStart; gStart=null;
+    if(!st) return;
+    const dx = e.clientX - st.x0, dy = e.clientY - st.y0;
+    const dt = performance.now() - st.t;
+    if(Math.abs(dx) < gestureMin && Math.abs(dy) < gestureMin && dt < 250){
+      // tap
+      rotate();
+      return;
+    }
+    if(Math.abs(dy) > Math.abs(dx)){
+      if(dy > 32){
+        // swipe down -> hard drop for mobile convenience
+        hardDrop();
+      } else if(dy < -32){
+        // swipe up -> rotate
+        rotate();
+      }
+    }
+  }, {capture:true});
 
   function routeGameKey(e){
     if(!running && !(e.key==='p'||e.key==='P'||e.key==='R'||e.key==='r')) return;
@@ -510,7 +643,12 @@
     }
   }
 
-  // Bootstrap preview
+  function makeBoard(){ const b=[]; for(let r=0;r<ROWS;r++){ b[r]=new Array(COLS).fill(null); } return b; }
+
+  // Bootstrap
+  // Auto-enable mobile controls/gestures on iOS
+  if(isIOS){ showMobile.checked = true; gesturesEl.checked = true; }
+  refreshMobileControls();
   drawNext();
 })();
 </script>
