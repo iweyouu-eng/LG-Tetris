@@ -2,16 +2,16 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<title>Tetris (NES 룰) + BGM v4.9.4 [Start Fix]</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Tetris (NES 룰) + BGM v4.9.5 [iOS zoom fix]</title>
 <style>
   :root { --bg:#0f1115; --panel:rgba(255,255,255,0.06); --accent:#7dd3fc; --btn:#1f2937; --btnBorder:rgba(255,255,255,.18); }
-  html, body { margin:0; padding:0; height:100%; background:linear-gradient(180deg,#0f1115,#0b0d11); color:#e5e7eb; font:14px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Pretendard,Apple SD Gothic Neo,Malgun Gothic,Arial,sans-serif; overscroll-behavior: none; }
+  html, body { margin:0; padding:0; height:100%; background:linear-gradient(180deg,#0f1115,#0b0d11); color:#e5e7eb; font:14px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Pretendard,Apple SD Gothic Neo,Malgun Gothic,Arial,sans-serif; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
   .wrap { max-width:1100px; margin:0 auto; padding:10px; display:grid; grid-template-columns: 1fr; gap:10px; padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
   @media (min-width: 950px){ .wrap { grid-template-columns: 0.9fr 1.1fr; padding-bottom: 10px; } }
   .card { background: var(--panel); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:10px; }
   #stage { position:relative; display:flex; justify-content:center; align-items:center; min-height:60vh; touch-action:none; overscroll-behavior: contain; }
-  #game { background:#111; border:1px solid rgba(255,255,255,.1); border-radius:8px; image-rendering: pixelated; outline:none; touch-action:none; }
+  #game { background:#111; border:1px solid rgba(255,255,255,.1); border-radius:8px; image-rendering: pixelated; outline:none; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color: rgba(0,0,0,0); }
   #overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.55); border-radius:10px; z-index:1500; }
   #overlay.hidden { display:none; }
   #overlay .box { text-align:center; }
@@ -30,12 +30,11 @@
   .cluster { display:flex; gap:10px; pointer-events: auto; }
   .mbtn { background: var(--btn); border: 1px solid var(--btnBorder); color: #fff; border-radius:16px;
            display:flex; align-items:center; justify-content:center; width:64px; height:64px; font-size:22px;
-           box-shadow: 0 6px 20px rgba(0,0,0,0.35); touch-action:manipulation;
-           -webkit-user-select:none; user-select:none; }
+           box-shadow: 0 6px 20px rgba(0,0,0,0.35); touch-action:none;  /* stronger than manipulation */
+           -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color: rgba(0,0,0,0); }
   .mbtn:active { transform: translateY(1px); }
   .hidden { display:none !important; }
   .muted { opacity:.55; pointer-events:none; }
-  /* Floating start FAB (backup) */
   #startFab {
     position: fixed; right: 12px; top: 12px; z-index: 1600;
     background: #16a34a; color: #fff; border: none; border-radius: 9999px;
@@ -125,7 +124,24 @@
   const startFab = document.getElementById('startFab');
   function dbg(o){ try{ dbgEl.textContent = JSON.stringify(o); }catch{} }
 
-  // --- Debug copy + move (from 4.9.3b) ---
+  // ---- Global double‑tap & pinch zoom blocker (strict for iOS) ----
+  (function installZoomBlocker(){
+    let lastTouch = 0;
+    const blockDbl = (e)=>{
+      const now = Date.now();
+      if(now - lastTouch < 350){
+        e.preventDefault(); e.stopPropagation();
+      }
+      lastTouch = now;
+    };
+    const blockAll = (e)=>{ e.preventDefault(); e.stopPropagation(); };
+    // Capture phase to beat default handlers
+    ['dblclick'].forEach(ev => document.addEventListener(ev, blockAll, {passive:false, capture:true}));
+    ['touchend'].forEach(ev => document.addEventListener(ev, blockDbl, {passive:false, capture:true}));
+    ['gesturestart','gesturechange','gestureend'].forEach(ev => document.addEventListener(ev, blockAll, {passive:false, capture:true}));
+  })();
+
+  // --- Debug copy & move ---
   let dbgPosTop = window.matchMedia('(max-width: 950px)').matches;
   if(dbgPosTop) dbgEl.classList.add('top');
   function copyDbg(){
@@ -139,7 +155,7 @@
   dbgEl.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); copyDbg(); });
   let lastTap=0; dbgEl.addEventListener('touchend', e=>{ const now=Date.now(); if(now-lastTap<300){ dbgPosTop=!dbgPosTop; dbgEl.classList.toggle('top', dbgPosTop); } lastTap=now; }, {passive:false});
 
-  // ====== BGM & Game – from 4.9.3 (soft-drop watchdog etc.) ======
+  // ====== BGM & Game – same as 4.9.4 ======
   const TRACKS = { A:'bgm_A.mp3', B:'bgm_B.mp3', C:'bgm_C.mp3' };
   const order = ['A','B','C'];
   const bgmEl = document.getElementById('bgmAudio');
@@ -186,7 +202,7 @@
   setStartBtn.addEventListener('click', ()=>{ loopStartEl.value=bgmEl.currentTime.toFixed(2); applyLoopInputs(); });
   setEndBtn.addEventListener('click', ()=>{ loopEndEl.value=bgmEl.currentTime.toFixed(2); applyLoopInputs(); });
 
-  // Game core
+  // Game core (unchanged from 4.9.4)
   const COLS=10, ROWS=20, SIZE=32;
   const COLORS={ I:'#67e8f9', J:'#60a5fa', L:'#f59e0b', O:'#fef08a', S:'#34d399', T:'#c084fc', Z:'#f87171', X:'#0b0d12' };
   const SHAPES={ I:[[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]], J:[[1,0,0],[1,1,1],[0,0,0]], L:[[0,0,1],[1,1,1],[0,0,0]], O:[[1,1],[1,1]], S:[[0,1,1],[1,1,0],[0,0,0]], Z:[[1,1,0],[0,1,1],[0,0,0]], T:[[0,1,0],[1,1,1],[0,0,0]] };
@@ -267,37 +283,23 @@
   function gameOver(){ running=false; resetGame(true); }
   function resetGame(keepOverlay){ board=makeBoard(); current=null; nextType=pickType(); dropInterval=gravityMsForLevel(level=0); lastTime=0; acc=0; lines=0; if(!keepOverlay){ overlay.classList.remove('hidden'); startFab.classList.remove('hidden'); } }
 
-  // Start function (global fallback)
   async function __startGame(startAudio=true){
-    // Try audio init but don't block game
     if(startAudio){
-      const ok = await initAudio();
-      applyLoopInputs();
-      setTrack(trackSel.value);
-      if(!ok){
-        console.warn('오디오 권한/초기화 실패 – 게임은 무음으로 시작');
-      }
+      const ok = await initAudio(); applyLoopInputs(); setTrack(trackSel.value);
+      if(!ok){ console.warn('오디오 권한/초기화 실패 – 게임은 무음으로 시작'); }
     }
-    overlay.classList.add('hidden');
-    startFab.classList.add('hidden');
-    if(current==null) spawn();
-    running = true;
-    requestAnimationFrame(loop);
-    document.getElementById('game').focus({preventScroll:true});
+    overlay.classList.add('hidden'); startFab.classList.add('hidden');
+    if(current==null) spawn(); running = true; requestAnimationFrame(loop); document.getElementById('game').focus({preventScroll:true});
   }
   window.__startGameFromUI = __startGame;
 
-  // Binders for various start entry points
   document.getElementById('startBtn').addEventListener('click', ()=> __startGame(true));
   document.getElementById('startNoAudioBtn').addEventListener('click', ()=> __startGame(false));
   startFab.addEventListener('click', ()=> __startGame(true));
-  // Pointerup fallback (iOS sometimes swallows click)
   document.getElementById('startBtn').addEventListener('pointerup', ()=> __startGame(true));
   document.getElementById('startNoAudioBtn').addEventListener('pointerup', ()=> __startGame(false));
-  // Enter key to start
   window.addEventListener('keydown', (e)=>{ if(overlay && !overlay.classList.contains('hidden') && (e.key==='Enter' || e.key===' ')){ e.preventDefault(); __startGame(true); } }, true);
 
-  // Controls binding
   function bindHold(btn, onPress, onRelease){
     btn.addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); try{ btn.setPointerCapture(e.pointerId);}catch{} onPress(); });
     const end = e=>{ e.preventDefault(); onRelease && onRelease(); };
@@ -311,23 +313,6 @@
   bindHold(document.getElementById('mSoft'), ()=> setDown(true), ()=> setDown(false));
   document.getElementById('mRotate').addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); rotate(); });
   document.getElementById('mHard').addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); hardDrop(); });
-
-  // Keyboard
-  const lockKeysEl=document.getElementById('lockKeys');
-  const enableHardDropEl=document.getElementById('enableHardDrop');
-  window.addEventListener('keydown', (e)=>{
-    const k=e.key; const isGameKey=(k==='ArrowLeft'||k==='ArrowRight'||k==='ArrowDown'||k==='ArrowUp'||k==='x'||k==='X'||k===' '||k==='p'||k==='P'||k==='r'||k==='R');
-    if(!isGameKey) return;
-    if(lockKeysEl.checked){ e.preventDefault(); e.stopPropagation(); }
-    if(k==='ArrowLeft'){ taps.left++; setLeft(true); }
-    else if(k==='ArrowRight'){ taps.right++; setRight(true); }
-    else if(k==='ArrowDown'){ setDown(true); }
-    else if(k==='ArrowUp'||k==='x'||k==='X'){ rotate(); }
-    else if(k===' ' && enableHardDropEl.checked){ hardDrop(); }
-    else if(k==='p'||k==='P'){ running=!running; }
-    else if(k==='r'||k==='R'){ resetGame(); }
-  }, true);
-  window.addEventListener('keyup', (e)=>{ const k=e.key; if(k==='ArrowLeft') setLeft(false); else if(k==='ArrowRight') setRight(false); else if(k==='ArrowDown') setDown(false); }, true);
 })();
 </script>
 </body>
