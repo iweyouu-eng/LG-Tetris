@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Tetris (NES 룰) + BGM v4.1</title>
+<title>Tetris (NES 룰) + BGM v4.2</title>
 <style>
   :root { --bg:#0f1115; --panel:rgba(255,255,255,0.06); --accent:#7dd3fc; }
   html, body { margin:0; padding:0; height:100%; background:linear-gradient(180deg,#0f1115,#0b0d11); color:#e5e7eb; font:14px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Pretendard,Apple SD Gothic Neo,Malgun Gothic,Arial,sans-serif; }
@@ -20,7 +20,7 @@
   #stats { display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:8px; }
   .stat { background:rgba(0,0,0,0.35); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,.08); }
   .strong { font-weight:800; color:#fff; }
-  .controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
   .note { font-size:12px; color:#cbd5e1; }
   .grid { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:6px; margin-top:8px; }
   .kbd { background:#0b1220; border:1px solid rgba(255,255,255,.15); padding:6px 8px; border-radius:8px; font-size:12px; }
@@ -28,11 +28,10 @@
   #pad .btn { padding:12px; }
   @media (min-width: 900px){ #pad { display:none; } }
   #err { position:fixed; left:10px; bottom:10px; background:#c00; color:#fff; padding:8px 10px; border-radius:8px; font-size:12px; z-index:9999; white-space:pre-wrap; display:none; }
+  #dbg { position:fixed; right:10px; bottom:10px; font-size:11px; color:#9ca3af; }
   .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:6px 0; }
   .sep { width:1px; height:20px; background:rgba(255,255,255,.15); display:inline-block; }
   input[type="number"] { width:80px; }
-  label small { opacity:.8; }
-  #dbg { position:fixed; right:10px; bottom:10px; font-size:11px; color:#9ca3af; }
 </style>
 </head>
 <body>
@@ -58,7 +57,7 @@
         <span class="sep"></span>
         <label>트랙: 
           <select id="trackSel">
-            <option value="A">A</option>
+            <option value="A" selected>A</option>
             <option value="B">B</option>
           </select>
         </label>
@@ -148,6 +147,24 @@
     }
   }
 
+  function fadeTo(target, dur){
+    if(!audioCtx || !fadeGain) return;
+    const g = fadeGain.gain;
+    const now = audioCtx.currentTime;
+    try{
+      g.setValueAtTime(g.value, now);
+      g.linearRampToValueAtTime(target, now + Math.max(0, dur||0));
+    }catch{}
+  }
+
+  function applyLoopInputs(){
+    loopOn = !!loopEnable.checked;
+    loopStart = parseFloat(loopStartEl.value)||0;
+    loopEnd = parseFloat(loopEndEl.value)||9999;
+    if(loopEnd <= loopStart + 0.05){ loopOn=false; }
+    bgmEl.loop = !loopOn;
+  }
+
   function setTrack(name){
     const url = TRACKS[name] || TRACKS.A;
     const wasPlaying = !bgmEl.paused;
@@ -167,36 +184,8 @@
     else doSwap();
   }
 
-  function fadeTo(target, dur){
-    if(!audioCtx || !fadeGain) return;
-    const g = fadeGain.gain;
-    const now = audioCtx.currentTime;
-    try{
-      g.setValueAtTime(g.value, now);
-      g.linearRampToValueAtTime(target, now + Math.max(0, dur||0));
-    }catch{}
-  }
-
-  function applyLoopInputs(){
-    loopOn = !!loopEnable.checked;
-    loopStart = parseFloat(loopStartEl.value)||0;
-    loopEnd = parseFloat(loopEndEl.value)||9999;
-    if(loopEnd <= loopStart + 0.05){ loopOn=false; }
-    bgmEl.loop = !loopOn;
-  }
-
-  setStartBtn.addEventListener('click', ()=>{ loopStartEl.value = bgmEl.currentTime.toFixed(2); applyLoopInputs(); });
-  setEndBtn.addEventListener('click', ()=>{ loopEndEl.value = bgmEl.currentTime.toFixed(2); applyLoopInputs(); });
-  loopEnable.addEventListener('change', applyLoopInputs);
-  loopStartEl.addEventListener('input', applyLoopInputs);
-  loopEndEl.addEventListener('input', applyLoopInputs);
-
-  bgmEl.addEventListener('timeupdate', ()=>{
-    if(!loopOn) return;
-    if(bgmEl.currentTime >= loopEnd - 0.02){
-      bgmEl.currentTime = loopStart;
-      if(bgmEl.paused && bgmToggle.checked){ bgmEl.play().catch(()=>{}); }
-    }
+  bgmEl.addEventListener('error', ()=>{
+    toast('BGM 로드 실패: '+ (bgmEl.src||''));
   });
 
   bgmVol.addEventListener('input', ()=>{
@@ -225,6 +214,12 @@
     }, Math.max(1, outDur*1000 + 200));
   });
 
+  loopEnable.addEventListener('change', applyLoopInputs);
+  loopStartEl.addEventListener('input', applyLoopInputs);
+  loopEndEl.addEventListener('input', applyLoopInputs);
+  setStartBtn.addEventListener('click', ()=>{ loopStartEl.value = bgmEl.currentTime.toFixed(2); applyLoopInputs(); });
+  setEndBtn.addEventListener('click', ()=>{ loopEndEl.value = bgmEl.currentTime.toFixed(2); applyLoopInputs(); });
+
   // ---------- Game (NES approx) ----------
   const COLS=10, ROWS=20, SIZE=32;
   const COLORS = { I:'#67e8f9', J:'#60a5fa', L:'#f59e0b', O:'#fef08a', S:'#34d399', T:'#c084fc', Z:'#f87171', X:'#0b0d12' };
@@ -238,6 +233,17 @@
     T:[[0,1,0],[1,1,1],[0,0,0]]
   };
   const TYPES = ['I','J','L','O','S','T','Z'];
+
+  // FIX: prevType must be initialized BEFORE pickType/nextType to avoid TDZ
+  let prevType = null;
+  function pickType(){
+    const roll = ()=> TYPES[(Math.random()*TYPES.length)|0];
+    let t = roll();
+    if(prevType && t===prevType) t = roll();
+    prevType = t;
+    return t;
+  }
+
   const GFRAMES = { 0:48,1:43,2:38,3:33,4:28,5:23,6:18,7:13,8:8,9:6, 10:5,11:5,12:5,13:4,14:4,15:4,16:3,17:3,18:3,19:2, 20:2,21:2,22:2,23:2,24:2,25:2,26:2,27:2,28:2,29:1 };
   function gravityMsForLevel(lv){ const frames = GFRAMES[Math.min(29, lv)] ?? 48; return Math.max(16, frames*(1000/60)); }
 
@@ -248,7 +254,7 @@
   const nctx = nextCanvas.getContext('2d');
   let board = makeBoard();
   let current = null;
-  let nextType = pickType();
+  let nextType = pickType(); // SAFE now
   let dropInterval = gravityMsForLevel(0);
   let lastTime = 0;
   let acc = 0;
@@ -257,9 +263,10 @@
 
   const overlay = document.getElementById('overlay');
   document.getElementById('startBtn').addEventListener('click', async ()=>{
-    const ok = await initAudio(); // may fail; game continues
+    const ok = await initAudio(); // may fail; game continues regardless
     applyLoopInputs();
-    if(ok){ setTrack(trackSel.value); fadeTo(1.0, parseFloat(fadeInEl.value)||0); }
+    setTrack(trackSel.value);     // A or B
+    if(ok) fadeTo(1.0, parseFloat(fadeInEl.value)||0);
     overlay.classList.add('hidden');
     startGame();
   });
@@ -289,9 +296,6 @@
   function clone(m){ return m.map(row=>row.slice()); }
   function rotateCW(m){ const h=m.length,w=m[0].length; const out=[]; for(let x=0;x<w;x++){ const row=[]; for(let y=h-1;y>=0;y--){ row.push(m[y][x]); } out.push(row); } return out; }
   function getShape(t){ return clone(SHAPES[t]); }
-
-  let prevType = null;
-  function pickType(){ const roll = ()=> TYPES[(Math.random()*TYPES.length)|0]; let t=roll(); if(prevType && t===prevType) t=roll(); prevType=t; return t; }
 
   function spawn(){
     const t = nextType; nextType = pickType();
@@ -386,14 +390,14 @@
   }
 
   function render(){
-    // CSS scaling with guard >= 1
     const st = document.getElementById('stage');
     const rect = st.getBoundingClientRect();
     const wScale = Math.floor(rect.width/(COLS*SIZE));
     const hScale = Math.floor(rect.height/(ROWS*SIZE));
     const scale = Math.max(1, Math.min(wScale, hScale));
     const cssW = COLS*SIZE*scale, cssH = ROWS*SIZE*scale;
-    canvas.style.width = cssW+'px'; canvas.style.height = cssH+'px';
+    const style = canvas.style;
+    style.width = cssW+'px'; style.height = cssH+'px';
 
     ctx.clearRect(0,0,canvas.width,canvas.height);
     for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){
@@ -413,7 +417,7 @@
       const dt = ts - lastTime; lastTime = ts;
       update(dt);
       render();
-      dbgEl.textContent = 'dt:'+Math.round(dt)+'ms  level:'+level+'  acc:'+Math.round(acc)+'  running:'+(running?1:0);
+      dbgEl.textContent = 'dt:'+Math.round(dt)+'ms  level:'+level+'  running:'+(running?1:0);
     }catch(e){
       toast('루프 에러: '+e.message);
     }
@@ -460,6 +464,11 @@
       if(m[y][x]) drawCell(nctx, offx+x*cell, offy+y*cell, cell, color);
     }
   }
+
+  function makeBoard(){ const b=[]; for(let r=0;r<ROWS;r++){ b[r]=new Array(COLS).fill(null); } return b; } // moved to bottom to avoid hoist confusion
+  function clone(m){ return m.map(row=>row.slice()); }
+  function rotateCW(m){ const h=m.length,w=m[0].length; const out=[]; for(let x=0;x<w;x++){ const row=[]; for(let y=h-1;y>=0;y--){ row.push(m[y][x]); } out.push(row); } return out; }
+  function getShape(t){ return clone(SHAPES[t]); }
 
   // Bootstrap preview
   drawNext();
