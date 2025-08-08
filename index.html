@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Tetris (NES 룰) + BGM v4.9.7 [PC KB focus]</title>
+<title>Tetris (NES 룰) + BGM v4.9.8 [Release]</title>
 <style>
   :root { --bg:#0f1115; --panel:rgba(255,255,255,0.06); --accent:#7dd3fc; --btn:#1f2937; --btnBorder:rgba(255,255,255,.18); }
   html, body { margin:0; padding:0; height:100%; background:linear-gradient(180deg,#0f1115,#0b0d11); color:#e5e7eb; font:14px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Pretendard,Apple SD Gothic Neo,Malgun Gothic,Arial,sans-serif; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
@@ -17,10 +17,10 @@
   #overlay .box { text-align:center; }
   .btn { background:var(--btn); color:#fff; border:1px solid var(--btnBorder); border-radius:12px; padding:10px 12px; cursor:pointer; }
   .btn:disabled{ opacity:.5; cursor:not-allowed; }
+  /* Debug HUD (hidden by default) */
   #dbg { position:fixed; right:10px; bottom:110px; font-size:11px; color:#e5e7eb; white-space:pre; background:rgba(0,0,0,.55); padding:6px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.15); z-index:1400; 
-         backdrop-filter: blur(2px); max-width:80vw; }
+         backdrop-filter: blur(2px); max-width:80vw; display:none; }
   #dbg.top { left:10px; top:10px; right:auto; bottom:auto; }
-  #dbg::after { content:' 탭하면 복사 '; font-size:10px; opacity:.7; }
   #mobileControls {
     position: fixed; left: 0; right: 0; bottom: 0;
     padding: 8px calc(12px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
@@ -41,6 +41,8 @@
     padding: 10px 14px; font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.35);
   }
   .card[inert] { filter: saturate(.7) opacity(.85); }
+  /* Title tap target for mobile debug toggle */
+  #titleTap { user-select:none; -webkit-user-select:none; -webkit-tap-highlight-color: rgba(0,0,0,0); }
 </style>
 </head>
 <body>
@@ -51,7 +53,7 @@
     <canvas id="game" width="320" height="640" tabindex="0"></canvas>
     <div id="overlay">
       <div class="box">
-        <h2 style="margin:0 0 10px 0;">Tetris (NES) + BGM</h2>
+        <h2 id="titleTap" style="margin:0 0 10px 0;">Tetris (NES) + BGM</h2>
         <p class="note">시작을 누르면 오디오 권한이 활성화되고 BGM이 재생됩니다.</p>
         <div style="display:flex; gap:8px; justify-content:center;">
           <button id="startBtn" class="btn" onclick="window.__startGameFromUI&&window.__startGameFromUI(true)">▶ 시작</button>
@@ -120,16 +122,40 @@
 
 <script>
 (function(){
-  const dbgEl = document.getElementById('dbg');
   const overlay = document.getElementById('overlay');
   const startFab = document.getElementById('startFab');
   const controlsCard = document.getElementById('controlsCard');
   const stage = document.getElementById('stage');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled=false;
-  function dbg(o){ try{ dbgEl.textContent = JSON.stringify(o); }catch{} }
 
-  // ---- Zoom blocker (iOS) ----
+  // ===== Debug HUD toggle (release default: off) =====
+  const dbgEl = document.getElementById('dbg');
+  let debugOn = /debug=1|#debug/i.test(location.search+location.hash) || localStorage.getItem('tetris_debug')==='1';
+  function setDebug(on){
+    debugOn = !!on;
+    localStorage.setItem('tetris_debug', on?'1':'0');
+    dbgEl.style.display = on ? 'block' : 'none';
+  }
+  setDebug(debugOn);
+  function dbg(o){ if(!debugOn) return; try{ dbgEl.textContent = JSON.stringify(o); }catch{} }
+  // Ctrl+Alt+D to toggle (desktop)
+  window.addEventListener('keydown', (e)=>{
+    if(e.ctrlKey && e.altKey && (e.key==='d' || e.key==='D')){
+      setDebug(!debugOn);
+      e.preventDefault();
+    }
+  }, true);
+  // 5x tap title to toggle (mobile)
+  (function(){
+    const title = document.getElementById('titleTap'); let taps=[];
+    title.addEventListener('touchend', ()=>{
+      const now=Date.now(); taps.push(now); taps = taps.filter(t=> now - t < 900);
+      if(taps.length>=5){ setDebug(!debugOn); taps=[]; }
+    }, {passive:true});
+  })();
+
+  // ---- iOS double‑tap & pinch zoom blocker ----
   (function installZoomBlocker(){
     let lastTouch = 0;
     const blockDbl = (e)=>{ const now=Date.now(); if(now-lastTouch<350){ e.preventDefault(); e.stopPropagation(); } lastTouch=now; };
@@ -139,7 +165,7 @@
     ['gesturestart','gesturechange','gestureend'].forEach(ev => document.addEventListener(ev, blockAll, {passive:false, capture:true}));
   })();
 
-  // ====== BGM (same as 4.9.6, robust ABC cycle) ======
+  // ====== BGM (robust ABC cycle) ======
   const TRACKS = { A:'bgm_A.mp3', B:'bgm_B.mp3', C:'bgm_C.mp3' };
   const order = ['A','B','C'];
   const bgmEl = document.getElementById('bgmAudio');
@@ -251,7 +277,6 @@
     if(lockKeysEl.checked){
       e.preventDefault();
     }
-    // Always refocus canvas on any game key
     canvas.focus({preventScroll:true});
   }
   document.addEventListener('keydown', captureKey, {capture:true});
@@ -265,7 +290,8 @@
     if(lockKeysEl.checked && running){ controlsCard.setAttribute('inert',''); }
     else { controlsCard.removeAttribute('inert'); }
   }
-  lockKeysEl.addEventListener('change', updateControlsInert);
+  document.getElementById('btnPause').addEventListener('click', ()=>{ running=!running; updateControlsInert(); if(running) canvas.focus({preventScroll:true}); });
+  document.getElementById('btnReset').addEventListener('click', ()=>{ board=makeBoard(); current=null; nextType=pickType(); dropInterval=gravityMsForLevel(level=0); lastTime=0; acc=0; lines=0; overlay.classList.remove('hidden'); startFab.classList.remove('hidden'); updateControlsInert(); });
 
   // Mobile buttons
   function bindHold(btn, onPress, onRelease){
@@ -291,7 +317,7 @@
     else if(k==='ArrowUp'||k==='x'||k==='X'){ rotate(); }
     else if(k===' ' && document.getElementById('enableHardDrop').checked){ hardDrop(); }
     else if(k==='p'||k==='P'){ running=!running; updateControlsInert(); if(running) canvas.focus({preventScroll:true}); }
-    else if(k==='r'||k==='R'){ resetGame(); }
+    else if(k==='r'||k==='R'){ board=makeBoard(); current=null; nextType=pickType(); dropInterval=gravityMsForLevel(level=0); lastTime=0; acc=0; lines=0; overlay.classList.remove('hidden'); startFab.classList.remove('hidden'); updateControlsInert(); }
   });
   window.addEventListener('keyup', (e)=>{ const k=e.key; if(k==='ArrowLeft') setLeft(false); else if(k==='ArrowRight') setRight(false); else if(k==='ArrowDown') setDown(false); });
 
@@ -318,6 +344,7 @@
     while(now>=nextHMoveAt){ if(!tryMove(hDir==='L'?-1:1,0)) break; nextHMoveAt+=arrMs; if(arrMs<=0) break; }
   }
   function validTime(t){ return Number.isFinite(t) && t<=1e13; }
+  let nextSoftAt=0, lastSoftAdvanceAt=0, lastY=null;
   function handleSoft(now){
     if(!input.down){ nextSoftAt = now + softMs; lastSoftAdvanceAt = now; return; }
     if(!validTime(nextSoftAt)){ nextSoftAt = now + softMs; }
@@ -333,6 +360,7 @@
     }
     lastY = current.y;
   }
+  let hDir=null; let nextHMoveAt=0; // redeclare after functions that use them (kept as in earlier build)
   function update(dt){
     if(!running){ return; }
     if(!current){ spawn(); }
