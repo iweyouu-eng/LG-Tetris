@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Tetris (NES 룰) + BGM v4.9.5 [iOS zoom fix]</title>
+<title>Tetris (NES 룰) + BGM v4.9.6 [KB lock + BGM cycle]</title>
 <style>
   :root { --bg:#0f1115; --panel:rgba(255,255,255,0.06); --accent:#7dd3fc; --btn:#1f2937; --btnBorder:rgba(255,255,255,.18); }
   html, body { margin:0; padding:0; height:100%; background:linear-gradient(180deg,#0f1115,#0b0d11); color:#e5e7eb; font:14px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Pretendard,Apple SD Gothic Neo,Malgun Gothic,Arial,sans-serif; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
@@ -30,7 +30,7 @@
   .cluster { display:flex; gap:10px; pointer-events: auto; }
   .mbtn { background: var(--btn); border: 1px solid var(--btnBorder); color: #fff; border-radius:16px;
            display:flex; align-items:center; justify-content:center; width:64px; height:64px; font-size:22px;
-           box-shadow: 0 6px 20px rgba(0,0,0,0.35); touch-action:none;  /* stronger than manipulation */
+           box-shadow: 0 6px 20px rgba(0,0,0,0.35); touch-action:none;
            -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color: rgba(0,0,0,0); }
   .mbtn:active { transform: translateY(1px); }
   .hidden { display:none !important; }
@@ -40,6 +40,8 @@
     background: #16a34a; color: #fff; border: none; border-radius: 9999px;
     padding: 10px 14px; font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.35);
   }
+  /* Make controls ignorable when inert (visual hint) */
+  .card[inert] { filter: saturate(.7) opacity(.85); }
 </style>
 </head>
 <body>
@@ -60,7 +62,7 @@
     </div>
     <audio id="bgmAudio" preload="auto"></audio>
   </div>
-  <div class="card">
+  <div class="card" id="controlsCard">
     <div class="controls">
       <div class="row">
         <button id="btnPause" class="btn">⏸ 일시정지</button>
@@ -122,20 +124,17 @@
   const dbgEl = document.getElementById('dbg');
   const overlay = document.getElementById('overlay');
   const startFab = document.getElementById('startFab');
+  const controlsCard = document.getElementById('controlsCard');
+  const stage = document.getElementById('stage');
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled=false;
   function dbg(o){ try{ dbgEl.textContent = JSON.stringify(o); }catch{} }
 
-  // ---- Global double‑tap & pinch zoom blocker (strict for iOS) ----
+  // ---- iOS double‑tap & pinch zoom blocker ----
   (function installZoomBlocker(){
     let lastTouch = 0;
-    const blockDbl = (e)=>{
-      const now = Date.now();
-      if(now - lastTouch < 350){
-        e.preventDefault(); e.stopPropagation();
-      }
-      lastTouch = now;
-    };
+    const blockDbl = (e)=>{ const now=Date.now(); if(now-lastTouch<350){ e.preventDefault(); e.stopPropagation(); } lastTouch=now; };
     const blockAll = (e)=>{ e.preventDefault(); e.stopPropagation(); };
-    // Capture phase to beat default handlers
     ['dblclick'].forEach(ev => document.addEventListener(ev, blockAll, {passive:false, capture:true}));
     ['touchend'].forEach(ev => document.addEventListener(ev, blockDbl, {passive:false, capture:true}));
     ['gesturestart','gesturechange','gestureend'].forEach(ev => document.addEventListener(ev, blockAll, {passive:false, capture:true}));
@@ -144,18 +143,11 @@
   // --- Debug copy & move ---
   let dbgPosTop = window.matchMedia('(max-width: 950px)').matches;
   if(dbgPosTop) dbgEl.classList.add('top');
-  function copyDbg(){
-    const t = dbgEl.textContent; if(!t) return;
-    if(navigator.clipboard && navigator.clipboard.writeText){
-      navigator.clipboard.writeText(t).then(()=>flash('디버그 복사됨')).catch(()=>fallbackCopy(t));
-    }else fallbackCopy(t);
-  }
-  function fallbackCopy(t){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); flash('디버그 복사됨 (fallback)'); }
-  function flash(msg){ const div=document.createElement('div'); div.textContent=msg; div.style.cssText='position:fixed; top:12px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,.7); color:#fff; padding:6px 10px; border-radius:8px; z-index:2000;'; document.body.appendChild(div); setTimeout(()=>div.remove(),1200); }
+  function copyDbg(){ const t = dbgEl.textContent; if(!t) return; if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(t).catch(()=>{}); } }
   dbgEl.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); copyDbg(); });
   let lastTap=0; dbgEl.addEventListener('touchend', e=>{ const now=Date.now(); if(now-lastTap<300){ dbgPosTop=!dbgPosTop; dbgEl.classList.toggle('top', dbgPosTop); } lastTap=now; }, {passive:false});
 
-  // ====== BGM & Game – same as 4.9.4 ======
+  // ====== BGM with resilient ABC cycle ======
   const TRACKS = { A:'bgm_A.mp3', B:'bgm_B.mp3', C:'bgm_C.mp3' };
   const order = ['A','B','C'];
   const bgmEl = document.getElementById('bgmAudio');
@@ -176,6 +168,8 @@
   let audioCtx=null, srcNode=null, volGain=null, fadeGain=null;
   let loopStart=0, loopEnd=9999, loopOn=false;
   let userVol=parseFloat(bgmVol.value);
+  let currentIndex = 0; // index in order[]
+  function idxOf(val){ const i=order.indexOf(val); return i>=0? i:0; }
 
   async function initAudio(){
     if(audioCtx) return true;
@@ -186,15 +180,62 @@
       volGain = audioCtx.createGain();
       fadeGain = audioCtx.createGain();
       volGain.gain.value = userVol;
-      fadeGain.gain.value = 0.0;
+      fadeGain.gain.value = 1.0;
       srcNode.connect(volGain).connect(fadeGain).connect(audioCtx.destination);
       return true;
     }catch(e){ console.warn('오디오 초기화 실패', e); return false; }
   }
   function fadeTo(target,dur){ if(!audioCtx||!fadeGain) return; const g=fadeGain.gain, now=audioCtx.currentTime; try{ g.setValueAtTime(g.value,now); g.linearRampToValueAtTime(target, now+Math.max(0,dur||0)); }catch{} }
   function applyLoopInputs(){ loopOn=!!loopEnable.checked; loopStart=parseFloat(loopStartEl.value)||0; loopEnd=parseFloat(loopEndEl.value)||9999; if(loopEnd<=loopStart+0.05){ loopOn=false; } loopRow.classList.toggle('muted', cycleToggle.checked); bgmEl.loop = cycleToggle.checked? false : !loopOn; }
-  function setTrack(name){ const url=TRACKS[name]||TRACKS.A; const was=!bgmEl.paused; const out=parseFloat(fadeOutEl.value)||0, inn=parseFloat(fadeInEl.value)||0; if(was) fadeTo(0.0,out); const swap=()=>{ bgmEl.pause(); bgmEl.src=url; bgmEl.currentTime=loopStart||0; bgmEl.load(); if(bgmToggle.checked){ bgmEl.play().then(()=>fadeTo(1.0,inn)).catch(()=>{});} }; if(was&&out>0) setTimeout(swap,out*1000); else swap(); }
-  function nextTrack(){ const cur=trackSel.value; const idx=order.indexOf(cur); const n=order[(idx+1)%order.length]; trackSel.value=n; setTrack(n); }
+  function setTrackByIndex(i, withFade=true){
+    currentIndex = (i%order.length + order.length)%order.length;
+    const name = order[currentIndex];
+    trackSel.value = name;
+    const url = TRACKS[name];
+    const wasPlaying = !bgmEl.paused;
+    const out = withFade? (parseFloat(fadeOutEl.value)||0):0;
+    const inn = withFade? (parseFloat(fadeInEl.value)||0):0;
+    const swap = ()=>{
+      bgmEl.pause();
+      bgmEl.src = url;
+      bgmEl.currentTime = loopStart||0;
+      bgmEl.load();
+      if(bgmToggle.checked){
+        bgmEl.play().then(()=>{ if(withFade) fadeTo(1.0,inn); }).catch((e)=>{ console.warn('play 실패', e); });
+      }
+    };
+    if(wasPlaying && out>0){ fadeTo(0.0,out); setTimeout(swap, out*1000); } else swap();
+  }
+  function setTrack(name){ setTrackByIndex(idxOf(name)); }
+  function nextTrack(skipFade=false){ setTrackByIndex(currentIndex+1, !skipFade); }
+
+  // Robust ended/error handlers
+  bgmEl.addEventListener('ended', ()=>{
+    if(cycleToggle.checked){
+      // try next track; if it fails on error, error handler will re-try again
+      nextTrack();
+    }
+  });
+  bgmEl.addEventListener('error', ()=>{
+    console.warn('BGM 로드 실패: '+bgmEl.src);
+    if(cycleToggle.checked){
+      // auto-skip missing track
+      const startIdx = currentIndex;
+      let tries = order.length-1;
+      while(tries-- > 0){
+        currentIndex = (currentIndex+1)%order.length;
+        bgmEl.src = TRACKS[order[currentIndex]];
+        bgmEl.load();
+        // Try play immediately; if it errors again, loop continues on next 'error'
+        bgmEl.play().then(()=>{ return; }).catch(()=>{});
+        return;
+      }
+    }
+  });
+  bgmVol.addEventListener('input', ()=>{ userVol=parseFloat(bgmVol.value)||0; if(volGain) volGain.gain.value=userVol; });
+  bgmToggle.addEventListener('change', ()=>{ if(!audioCtx) return; if(bgmToggle.checked){ const inn=parseFloat(fadeInEl.value)||0; bgmEl.play().then(()=>fadeTo(1.0,inn)).catch(()=>{});} else { const out=parseFloat(fadeOutEl.value)||0; fadeTo(0.0,out); setTimeout(()=>bgmEl.pause(), out*1000);} });
+  trackSel.addEventListener('change', ()=> setTrack(trackSel.value));
+  testFadeBtn.addEventListener('click', ()=>{ const out=parseFloat(fadeOutEl.value)||0, inn=parseFloat(fadeInEl.value)||0; fadeTo(0.0,out); setTimeout(()=>{ if(bgmEl.paused) bgmEl.play().catch(()=>{}); fadeTo(1.0,inn); }, Math.max(1,out*1000+200)); });
   cycleToggle.addEventListener('change', applyLoopInputs);
   loopEnable.addEventListener('change', applyLoopInputs);
   loopStartEl.addEventListener('input', applyLoopInputs);
@@ -202,7 +243,7 @@
   setStartBtn.addEventListener('click', ()=>{ loopStartEl.value=bgmEl.currentTime.toFixed(2); applyLoopInputs(); });
   setEndBtn.addEventListener('click', ()=>{ loopEndEl.value=bgmEl.currentTime.toFixed(2); applyLoopInputs(); });
 
-  // Game core (unchanged from 4.9.4)
+  // ====== Game core (same as 4.9.5) with keyboard hard lock ======
   const COLS=10, ROWS=20, SIZE=32;
   const COLORS={ I:'#67e8f9', J:'#60a5fa', L:'#f59e0b', O:'#fef08a', S:'#34d399', T:'#c084fc', Z:'#f87171', X:'#0b0d12' };
   const SHAPES={ I:[[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]], J:[[1,0,0],[1,1,1],[0,0,0]], L:[[0,0,1],[1,1,1],[0,0,0]], O:[[1,1],[1,1]], S:[[0,1,1],[1,1,0],[0,0,0]], Z:[[1,1,0],[0,1,1],[0,0,0]], T:[[0,1,0],[1,1,1],[0,0,0]] };
@@ -211,7 +252,6 @@
   const GFRAMES={ 0:48,1:43,2:38,3:33,4:28,5:23,6:18,7:13,8:8,9:6,10:5,11:5,12:5,13:4,14:4,15:4,16:3,17:3,18:3,19:2,20:2,21:2,22:2,23:2,24:2,25:2,26:2,27:2,28:2,29:1 };
   function gravityMsForLevel(lv){ const frames=GFRAMES[Math.min(29,lv)] ?? 48; return Math.max(16, frames*(1000/60)); }
 
-  const canvas=document.getElementById('game'); const ctx=canvas.getContext('2d'); ctx.imageSmoothingEnabled=false;
   let board=makeBoard(); let current=null; let nextType=pickType(); let dropInterval=gravityMsForLevel(0); let lastTime=0; let acc=0; let running=false; let lines=0, level=0;
   const dasEl=document.getElementById('dasMs'), arrEl=document.getElementById('arrMs'), softEl=document.getElementById('softMs');
   let dasMs=parseFloat(dasEl.value)||130, arrMs=parseFloat(arrEl.value)||50, softMs=parseFloat(softEl.value)||50;
@@ -224,21 +264,81 @@
   let hDir=null; let nextHMoveAt=0, nextSoftAt=0;
   let lastY=null, lastSoftAdvanceAt=0;
 
-  function tryMove(dx,dy){ const nx=current.x+dx, ny=current.y+(dy||0); if(!collides(current,nx,ny)){ current.x=nx; current.y=ny; return true; } return false; }
-  function collides(piece,nx,ny,nm){ const m=nm||piece.m; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(!m[y][x]) continue; const bx=nx+x, by=ny+y; if(bx<0||bx>=COLS||by>=ROWS) return true; if(by>=0 && board[by][bx]) return true; } return false; }
-  function rotateCW(m){ const h=m.length,w=m[0].length; const out=[]; for(let x=0;x<w;x++){ const row=[]; for(let y=h-1;y>=0;y--){ row.push(m[y][x]); } out.push(row);} return out; }
-  function rotate(){ let nm=rotateCW(current.m); if(!collides(current,current.x,current.y,nm)) current.m=nm; }
-  function makeBoard(){ const b=[]; for(let r=0;r<ROWS;r++) b[r]=new Array(COLS).fill(null); return b; }
-  function getShape(t){ return SHAPES[t].map(r=>r.slice()); }
-  function spawn(){ const t=nextType; nextType=pickType(); current={ t, m:getShape(t), x:(COLS/2|0)-2, y:-2 }; lastY=current.y; if(collides(current,current.x,current.y)){ gameOver(); } }
-  function hardDrop(){ while(tryMove(0,1)){} lock(); }
-  function softStep(){ if(!tryMove(0,1)) lock(); }
-  function lock(){ const m=current.m; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(!m[y][x]) continue; const bx=current.x+x, by=current.y+y; if(by>=0) board[by][bx]=current.t; } clearLines(); spawn(); }
-  function clearLines(){ let cleared=0; for(let r=ROWS-1;r>=0;r--){ if(board[r].every(v=>!!v)){ board.splice(r,1); board.unshift(new Array(COLS).fill(null)); cleared++; r++; } } if(cleared>0){ if((lines+=cleared) >= (level+1)*10){ level++; dropInterval=gravityMsForLevel(level); } } }
-
   function setLeft(v){ if(v){ input.left=true; input.right=false; } else input.left=false; }
   function setRight(v){ if(v){ input.right=true; input.left=false; } else input.right=false; }
   function setDown(v){ input.down=!!v; if(!v){ const now=performance.now(); nextSoftAt = now + softMs; } }
+
+  // Strong keyboard lock in capture phase (prevents page scroll/controls focus)
+  const lockKeysEl=document.getElementById('lockKeys');
+  function isGameKey(k){ return (k==='ArrowLeft'||k==='ArrowRight'||k==='ArrowDown'||k==='ArrowUp'||k==='x'||k==='X'||k===' '||k==='p'||k==='P'||k==='r'||k==='R'); }
+  function hardCapture(e){
+    if(!running) return;
+    if(!lockKeysEl.checked) return;
+    if(!isGameKey(e.key)) return;
+    e.preventDefault(); e.stopPropagation(); if(e.stopImmediatePropagation) e.stopImmediatePropagation();
+    // Also ensure canvas focus
+    canvas.focus({preventScroll:true});
+  }
+  document.addEventListener('keydown', hardCapture, {capture:true});
+  document.addEventListener('keyup', hardCapture, {capture:true});
+
+  // Also set controls inert while running (if lock enabled)
+  function updateControlsInert(){
+    if(lockKeysEl.checked && running){
+      controlsCard.setAttribute('inert','');
+    }else{
+      controlsCard.removeAttribute('inert');
+    }
+  }
+  lockKeysEl.addEventListener('change', updateControlsInert);
+
+  // Focus canvas on any tap/click in stage
+  stage.addEventListener('pointerdown', ()=> canvas.focus({preventScroll:true}));
+
+  // Bind mobile buttons
+  function bindHold(btn, onPress, onRelease){
+    btn.addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); try{ btn.setPointerCapture(e.pointerId);}catch{} onPress(); });
+    const end = e=>{ e.preventDefault(); onRelease && onRelease(); };
+    ['pointerup','pointercancel','pointerleave'].forEach(ev=> btn.addEventListener(ev, end));
+    btn.addEventListener('touchend', end, {passive:false});
+    btn.addEventListener('touchcancel', end, {passive:false});
+    btn.addEventListener('contextmenu', e=> e.preventDefault());
+  }
+  bindHold(document.getElementById('mLeft'), ()=>{ taps.left++; setLeft(true); }, ()=> setLeft(false));
+  bindHold(document.getElementById('mRight'), ()=>{ taps.right++; setRight(true); }, ()=> setRight(false));
+  bindHold(document.getElementById('mSoft'), ()=> setDown(true), ()=> setDown(false));
+  document.getElementById('mRotate').addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); rotate(); });
+  document.getElementById('mHard').addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); hardDrop(); });
+
+  // Keyboard game actions (bubble phase still okay; capture already blocked defaults)
+  window.addEventListener('keydown', (e)=>{
+    const k=e.key; if(!isGameKey(k)) return;
+    // no need to preventDefault here; capture handler already did it if needed
+    if(k==='ArrowLeft'){ taps.left++; setLeft(true); }
+    else if(k==='ArrowRight'){ taps.right++; setRight(true); }
+    else if(k==='ArrowDown'){ setDown(true); }
+    else if(k==='ArrowUp'||k==='x'||k==='X'){ rotate(); }
+    else if(k===' ' && document.getElementById('enableHardDrop').checked){ hardDrop(); }
+    else if(k==='p'||k==='P'){ running=!running; updateControlsInert(); if(running) canvas.focus({preventScroll:true}); }
+    else if(k==='r'||k==='R'){ resetGame(); }
+  });
+  window.addEventListener('keyup', (e)=>{
+    const k=e.key; if(k==='ArrowLeft') setLeft(false); else if(k==='ArrowRight') setRight(false); else if(k==='ArrowDown') setDown(false);
+  });
+
+  function makeBoard(){ const b=[]; for(let r=0;r<ROWS;r++) b[r]=new Array(COLS).fill(null); return b; }
+  function clone(m){ return m.map(row=>row.slice()); }
+  function rotateCW(m){ const h=m.length,w=m[0].length; const out=[]; for(let x=0;x<w;x++){ const row=[]; for(let y=h-1;y>=0;y--){ row.push(m[y][x]); } out.push(row);} return out; }
+  function getShape(t){ return clone(SHAPES[t]); }
+
+  function spawn(){ const t=nextType; nextType=pickType(); current={ t, m:getShape(t), x:(COLS/2|0)-2, y:-2 }; lastY=current.y; if(collides(current,current.x,current.y)){ gameOver(); } }
+  function collides(piece,nx,ny,nm){ const m=nm||piece.m; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(!m[y][x]) continue; const bx=nx+x, by=ny+y; if(bx<0||bx>=COLS||by>=ROWS) return true; if(by>=0 && board[by][bx]) return true; } return false; }
+  function tryMove(dx,dy){ const nx=current.x+dx, ny=current.y+(dy||0); if(!collides(current,nx,ny)){ current.x=nx; current.y=ny; return true; } return false; }
+  function rotate(){ let nm=rotateCW(current.m); if(!collides(current,current.x,current.y,nm)) current.m=nm; }
+  function softStep(){ if(!tryMove(0,1)) lock(); }
+  function hardDrop(){ while(tryMove(0,1)){} lock(); }
+  function lock(){ const m=current.m; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(!m[y][x]) continue; const bx=current.x+x, by=current.y+y; if(by>=0) board[by][bx]=current.t; } clearLines(); spawn(); }
+  function clearLines(){ let cleared=0; for(let r=ROWS-1;r>=0;r--){ if(board[r].every(v=>!!v)){ board.splice(r,1); board.unshift(new Array(COLS).fill(null)); cleared++; r++; } } if(cleared>0){ if((lines+=cleared) >= (level+1)*10){ level++; dropInterval=gravityMsForLevel(level); } } }
 
   function handleHorizontal(now){
     if(taps.left>0){ tryMove(-1,0); taps.left=0; hDir='L'; nextHMoveAt=now+dasMs; }
@@ -278,18 +378,16 @@
     dbg({running, y:current?current.y:null, down:input.down});
   }
   function drawCell(c,x,y,s,color){ c.fillStyle=color; c.fillRect(x,y,s,s); c.strokeStyle='rgba(0,0,0,0.35)'; c.lineWidth=2; c.strokeRect(x+1,y+1,s-2,s-2); c.strokeStyle='rgba(255,255,255,0.12)'; c.lineWidth=2; c.strokeRect(x+0.5,y+0.5,s-1,s-1); }
-  function render(){ const rect=document.getElementById('stage').getBoundingClientRect(); const wScale=Math.floor(rect.width/(COLS*SIZE)), hScale=Math.floor(rect.height/(ROWS*SIZE)), scale=Math.max(1, Math.min(wScale,hScale)); canvas.style.width=(COLS*SIZE*scale)+'px'; canvas.style.height=(ROWS*SIZE*scale)+'px'; ctx.clearRect(0,0,canvas.width,canvas.height); for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){ const t=board[y][x]; drawCell(ctx,x*SIZE,y*SIZE,SIZE,t?COLORS[t]:COLORS.X); } if(current){ const m=current.m, color=COLORS[current.t]; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(m[y][x]) drawCell(ctx,(current.x+x)*SIZE,(current.y+y)*SIZE,SIZE,color); } } }
+  function render(){ const rect=stage.getBoundingClientRect(); const wScale=Math.floor(rect.width/(COLS*SIZE)), hScale=Math.floor(rect.height/(ROWS*SIZE)), scale=Math.max(1, Math.min(wScale,hScale)); canvas.style.width=(COLS*SIZE*scale)+'px'; canvas.style.height=(ROWS*SIZE*scale)+'px'; ctx.clearRect(0,0,canvas.width,canvas.height); for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){ const t=board[y][x]; drawCell(ctx,x*SIZE,y*SIZE,SIZE,t?COLORS[t]:COLORS.X); } if(current){ const m=current.m, color=COLORS[current.t]; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(m[y][x]) drawCell(ctx,(current.x+x)*SIZE,(current.y+y)*SIZE,SIZE,color); } } }
   function loop(ts){ requestAnimationFrame(loop); render(); update(ts - (window.__last||ts)); window.__last = ts; }
   function gameOver(){ running=false; resetGame(true); }
-  function resetGame(keepOverlay){ board=makeBoard(); current=null; nextType=pickType(); dropInterval=gravityMsForLevel(level=0); lastTime=0; acc=0; lines=0; if(!keepOverlay){ overlay.classList.remove('hidden'); startFab.classList.remove('hidden'); } }
+  function resetGame(keepOverlay){ board=makeBoard(); current=null; nextType=pickType(); dropInterval=gravityMsForLevel(level=0); lastTime=0; acc=0; lines=0; if(!keepOverlay){ overlay.classList.remove('hidden'); startFab.classList.remove('hidden'); } updateControlsInert(); }
 
+  // Start
   async function __startGame(startAudio=true){
-    if(startAudio){
-      const ok = await initAudio(); applyLoopInputs(); setTrack(trackSel.value);
-      if(!ok){ console.warn('오디오 권한/초기화 실패 – 게임은 무음으로 시작'); }
-    }
+    if(startAudio){ const ok = await initAudio(); applyLoopInputs(); setTrackByIndex(idxOf(trackSel.value), false); if(!ok){ console.warn('오디오 권한/초기화 실패 – 게임은 무음으로 시작'); } }
     overlay.classList.add('hidden'); startFab.classList.add('hidden');
-    if(current==null) spawn(); running = true; requestAnimationFrame(loop); document.getElementById('game').focus({preventScroll:true});
+    if(current==null) spawn(); running = true; requestAnimationFrame(loop); canvas.focus({preventScroll:true}); updateControlsInert();
   }
   window.__startGameFromUI = __startGame;
 
@@ -299,20 +397,6 @@
   document.getElementById('startBtn').addEventListener('pointerup', ()=> __startGame(true));
   document.getElementById('startNoAudioBtn').addEventListener('pointerup', ()=> __startGame(false));
   window.addEventListener('keydown', (e)=>{ if(overlay && !overlay.classList.contains('hidden') && (e.key==='Enter' || e.key===' ')){ e.preventDefault(); __startGame(true); } }, true);
-
-  function bindHold(btn, onPress, onRelease){
-    btn.addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); try{ btn.setPointerCapture(e.pointerId);}catch{} onPress(); });
-    const end = e=>{ e.preventDefault(); onRelease && onRelease(); };
-    ['pointerup','pointercancel','pointerleave'].forEach(ev=> btn.addEventListener(ev, end));
-    btn.addEventListener('touchend', end, {passive:false});
-    btn.addEventListener('touchcancel', end, {passive:false});
-    btn.addEventListener('contextmenu', e=> e.preventDefault());
-  }
-  bindHold(document.getElementById('mLeft'), ()=>{ taps.left++; setLeft(true); }, ()=> setLeft(false));
-  bindHold(document.getElementById('mRight'), ()=>{ taps.right++; setRight(true); }, ()=> setRight(false));
-  bindHold(document.getElementById('mSoft'), ()=> setDown(true), ()=> setDown(false));
-  document.getElementById('mRotate').addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); rotate(); });
-  document.getElementById('mHard').addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); hardDrop(); });
 })();
 </script>
 </body>
