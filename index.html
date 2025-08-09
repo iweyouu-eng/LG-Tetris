@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Tetris (NES 룰) + BGM v4.9.7 [PC KB focus]</title>
+<title>Tetris (NES 룰) + BGM v4.9.7-dbgsafe</title>
 <style>
   :root { --bg:#0f1115; --panel:rgba(255,255,255,0.06); --accent:#7dd3fc; --btn:#1f2937; --btnBorder:rgba(255,255,255,.18); }
   html, body { margin:0; padding:0; height:100%; background:linear-gradient(180deg,#0f1115,#0b0d11); color:#e5e7eb; font:14px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Pretendard,Apple SD Gothic Neo,Malgun Gothic,Arial,sans-serif; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
@@ -17,35 +17,34 @@
   #overlay .box { text-align:center; }
   .btn { background:var(--btn); color:#fff; border:1px solid var(--btnBorder); border-radius:12px; padding:10px 12px; cursor:pointer; }
   .btn:disabled{ opacity:.5; cursor:not-allowed; }
-  #dbg { position:fixed; right:10px; bottom:110px; font-size:11px; color:#e5e7eb; white-space:pre; background:rgba(0,0,0,.55); padding:6px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.15); z-index:1400; 
-         backdrop-filter: blur(2px); max-width:80vw; }
-  #dbg.top { left:10px; top:10px; right:auto; bottom:auto; }
-  #dbg::after { content:' 탭하면 복사 '; font-size:10px; opacity:.7; }
-  #mobileControls {
-    position: fixed; left: 0; right: 0; bottom: 0;
-    padding: 8px calc(12px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
-    display: flex; justify-content: space-between; align-items: flex-end;
-    z-index: 999; pointer-events: none;
+
+  /* ===== Debug HUD (obstruction-safe) ===== */
+  #dbg {
+    position:fixed; z-index:1400; font-size:11px; line-height:1.25;
+    color:#e5e7eb; background:rgba(0,0,0,.55); border:1px solid rgba(255,255,255,.15);
+    border-radius:10px; padding:6px 8px; max-width:80vw; max-height:32vh; overflow:auto;
+    backdrop-filter: blur(2px);
+    right:10px; bottom:110px; /* Desktop default */
+    -webkit-user-select: none; user-select: none;
   }
-  .cluster { display:flex; gap:10px; pointer-events: auto; }
-  .mbtn { background: var(--btn); border: 1px solid var(--btnBorder); color: #fff; border-radius:16px;
-           display:flex; align-items:center; justify-content:center; width:64px; height:64px; font-size:22px;
-           box-shadow: 0 6px 20px rgba(0,0,0,0.35); touch-action:none;
-           -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color: rgba(0,0,0,0); }
-  .mbtn:active { transform: translateY(1px); }
-  .hidden { display:none !important; }
-  .muted { opacity:.55; pointer-events:none; }
-  #startFab {
-    position: fixed; right: 12px; top: 12px; z-index: 1600;
-    background: #16a34a; color: #fff; border: none; border-radius: 9999px;
-    padding: 10px 14px; font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  /* Mobile default: top-left, safe-area aware */
+  @media (max-width: 950px){
+    #dbg { left: calc(8px + env(safe-area-inset-left)); top: calc(8px + env(safe-area-inset-top)); right:auto; bottom:auto; }
   }
-  .card[inert] { filter: saturate(.7) opacity(.85); }
+  /* Collapsed pill */
+  #dbg.collapsed {
+    padding:3px 6px; max-width:unset; max-height:unset; overflow:hidden;
+    background:rgba(0,0,0,.40); border-radius:9999px; border-color:rgba(255,255,255,.12);
+    box-shadow: 0 3px 10px rgba(0,0,0,.35);
+  }
+  #dbg.collapsed::before { content:"DBG"; font-weight:700; letter-spacing:.4px; font-size:10px; opacity:.9; }
+  #dbg.collapsed { cursor:pointer; }
+  #dbg.hint::after { content:"  (더블탭/더블클릭)"; font-size:10px; opacity:.6; }
 </style>
 </head>
 <body>
 <button id="startFab" title="시작이 안 눌리면 이걸 탭하세요">▶ 시작</button>
-<div id="dbg"></div>
+<div id="dbg" class="collapsed hint"></div>
 <div class="wrap">
   <div class="card" id="stage">
     <canvas id="game" width="320" height="640" tabindex="0"></canvas>
@@ -127,10 +126,19 @@
   const stage = document.getElementById('stage');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled=false;
-  function dbg(o){ try{ dbgEl.textContent = JSON.stringify(o); }catch{} }
+  function dbg(o){ try{ if(!dbgEl) return; if(dbgEl.classList.contains('collapsed')) return; dbgEl.textContent = JSON.stringify(o); }catch{} }
 
-  // ---- Zoom blocker (iOS) ----
-  (function installZoomBlocker(){
+  // Tiny DBG pill (double-tap/click to expand/collapse)
+  let lastTap=0;
+  function toggleDbg(){ dbgEl.classList.toggle('collapsed'); dbgEl.classList.remove('hint'); }
+  dbgEl.addEventListener('click', ()=>{ if(dbgEl.classList.contains('collapsed')) toggleDbg(); });
+  dbgEl.addEventListener('dblclick', (e)=>{ e.preventDefault(); toggleDbg(); });
+  dbgEl.addEventListener('touchend', (e)=>{
+    const now=Date.now(); if(now-lastTap<320){ e.preventDefault(); toggleDbg(); } lastTap=now;
+  }, {passive:false});
+
+  // iOS double-tap & pinch zoom blocker
+  (function(){
     let lastTouch = 0;
     const blockDbl = (e)=>{ const now=Date.now(); if(now-lastTouch<350){ e.preventDefault(); e.stopPropagation(); } lastTouch=now; };
     const blockAll = (e)=>{ e.preventDefault(); e.stopPropagation(); };
@@ -139,7 +147,7 @@
     ['gesturestart','gesturechange','gestureend'].forEach(ev => document.addEventListener(ev, blockAll, {passive:false, capture:true}));
   })();
 
-  // ====== BGM (same as 4.9.6, robust ABC cycle) ======
+  // ===== BGM (ABC cycle) =====
   const TRACKS = { A:'bgm_A.mp3', B:'bgm_B.mp3', C:'bgm_C.mp3' };
   const order = ['A','B','C'];
   const bgmEl = document.getElementById('bgmAudio');
@@ -160,8 +168,7 @@
   let audioCtx=null, srcNode=null, volGain=null, fadeGain=null;
   let loopStart=0, loopEnd=9999, loopOn=false;
   let userVol=parseFloat(bgmVol.value);
-  let currentIndex = 0;
-  function idxOf(val){ const i=order.indexOf(val); return i>=0? i:0; }
+  let currentIndex = 0; function idxOf(val){ const i=order.indexOf(val); return i>=0? i:0; }
 
   async function initAudio(){
     if(audioCtx) return true;
@@ -201,10 +208,7 @@
   function setTrack(name){ setTrackByIndex(idxOf(name)); }
   function nextTrack(skipFade=false){ setTrackByIndex(currentIndex+1, !skipFade); }
   bgmEl.addEventListener('ended', ()=>{ if(cycleToggle.checked) nextTrack(); });
-  bgmEl.addEventListener('error', ()=>{
-    console.warn('BGM 로드 실패: '+bgmEl.src);
-    if(cycleToggle.checked){ currentIndex=(currentIndex+1)%order.length; setTrackByIndex(currentIndex, false); }
-  });
+  bgmEl.addEventListener('error', ()=>{ console.warn('BGM 로드 실패: '+bgmEl.src); if(cycleToggle.checked){ currentIndex=(currentIndex+1)%order.length; setTrackByIndex(currentIndex, false); }});
   bgmVol.addEventListener('input', ()=>{ userVol=parseFloat(bgmVol.value)||0; if(volGain) volGain.gain.value=userVol; });
   bgmToggle.addEventListener('change', ()=>{ if(!audioCtx) return; if(bgmToggle.checked){ const inn=parseFloat(fadeInEl.value)||0; bgmEl.play().then(()=>fadeTo(1.0,inn)).catch(()=>{});} else { const out=parseFloat(fadeOutEl.value)||0; fadeTo(0.0,out); setTimeout(()=>bgmEl.pause(), out*1000);} });
   trackSel.addEventListener('change', ()=> setTrack(trackSel.value));
@@ -216,7 +220,7 @@
   setStartBtn.addEventListener('click', ()=>{ loopStartEl.value=bgmEl.currentTime.toFixed(2); applyLoopInputs(); });
   setEndBtn.addEventListener('click', ()=>{ loopEndEl.value=bgmEl.currentTime.toFixed(2); applyLoopInputs(); });
 
-  // ====== Game core + PC keyboard focus capture ======
+  // ===== Game core (v4.9.7) =====
   const COLS=10, ROWS=20, SIZE=32;
   const COLORS={ I:'#67e8f9', J:'#60a5fa', L:'#f59e0b', O:'#fef08a', S:'#34d399', T:'#c084fc', Z:'#f87171', X:'#0b0d12' };
   const SHAPES={ I:[[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]], J:[[1,0,0],[1,1,1],[0,0,0]], L:[[0,0,1],[1,1,1],[0,0,0]], O:[[1,1],[1,1]], S:[[0,1,1],[1,1,0],[0,0,0]], Z:[[1,1,0],[0,1,1],[0,0,0]], T:[[0,1,0],[1,1,1],[0,0,0]] };
@@ -225,7 +229,7 @@
   const GFRAMES={ 0:48,1:43,2:38,3:33,4:28,5:23,6:18,7:13,8:8,9:6,10:5,11:5,12:5,13:4,14:4,15:4,16:3,17:3,18:3,19:2,20:2,21:2,22:2,23:2,24:2,25:2,26:2,27:2,28:2,29:1 };
   function gravityMsForLevel(lv){ const frames=GFRAMES[Math.min(29,lv)] ?? 48; return Math.max(16, frames*(1000/60)); }
 
-  let board=makeBoard(); let current=null; let nextType=pickType(); let dropInterval=gravityMsForLevel(0); let lastTime=0; let acc=0; let running=false; let lines=0, level=0;
+  let board=makeBoard(); let current=null; let nextType=pickType(); let dropInterval=gravityMsForLevel(0); let acc=0; let running=false; let lines=0, level=0; let lastTime=0;
   const dasEl=document.getElementById('dasMs'), arrEl=document.getElementById('arrMs'), softEl=document.getElementById('softMs');
   let dasMs=parseFloat(dasEl.value)||130, arrMs=parseFloat(arrEl.value)||50, softMs=parseFloat(softEl.value)||50;
   dasEl.addEventListener('input', ()=> dasMs=Math.max(0,parseFloat(dasEl.value)||0));
@@ -243,29 +247,15 @@
 
   const lockKeysEl=document.getElementById('lockKeys');
   function isGameKey(k){ return (k==='ArrowLeft'||k==='ArrowRight'||k==='ArrowDown'||k==='ArrowUp'||k==='x'||k==='X'||k===' '||k==='p'||k==='P'||k==='r'||k==='R'); }
-
-  // Capture: prevent default only, let event bubble to our handler. Always refocus canvas.
   function captureKey(e){
     if(!isGameKey(e.key)) return;
     if(!running) return;
-    if(lockKeysEl.checked){
-      e.preventDefault();
-    }
-    // Always refocus canvas on any game key
+    if(lockKeysEl.checked){ e.preventDefault(); }
     canvas.focus({preventScroll:true});
   }
   document.addEventListener('keydown', captureKey, {capture:true});
   document.addEventListener('keyup', captureKey, {capture:true});
-
-  // Keep canvas focused while running – click/tap anywhere
   document.addEventListener('pointerdown', ()=>{ if(running) canvas.focus({preventScroll:true}); }, {passive:true});
-
-  // Inert controls when running (if lock enabled)
-  function updateControlsInert(){
-    if(lockKeysEl.checked && running){ controlsCard.setAttribute('inert',''); }
-    else { controlsCard.removeAttribute('inert'); }
-  }
-  lockKeysEl.addEventListener('change', updateControlsInert);
 
   // Mobile buttons
   function bindHold(btn, onPress, onRelease){
@@ -282,7 +272,7 @@
   document.getElementById('mRotate').addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); rotate(); });
   document.getElementById('mHard').addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); hardDrop(); });
 
-  // Keyboard game actions
+  // Keyboard actions
   window.addEventListener('keydown', (e)=>{
     const k=e.key; if(!isGameKey(k)) return;
     if(k==='ArrowLeft'){ taps.left++; setLeft(true); }
@@ -290,7 +280,7 @@
     else if(k==='ArrowDown'){ setDown(true); }
     else if(k==='ArrowUp'||k==='x'||k==='X'){ rotate(); }
     else if(k===' ' && document.getElementById('enableHardDrop').checked){ hardDrop(); }
-    else if(k==='p'||k==='P'){ running=!running; updateControlsInert(); if(running) canvas.focus({preventScroll:true}); }
+    else if(k==='p'||k==='P'){ running=!running; if(running) canvas.focus({preventScroll:true}); }
     else if(k==='r'||k==='R'){ resetGame(); }
   });
   window.addEventListener('keyup', (e)=>{ const k=e.key; if(k==='ArrowLeft') setLeft(false); else if(k==='ArrowRight') setRight(false); else if(k==='ArrowDown') setDown(false); });
@@ -344,19 +334,19 @@
       }
       acc=0;
     }
-    dbg({running, focused: document.activeElement===canvas, y:current?current.y:null, down:input.down});
+    dbg({running, y:current?current.y:null, down:input.down});
   }
   function drawCell(c,x,y,s,color){ c.fillStyle=color; c.fillRect(x,y,s,s); c.strokeStyle='rgba(0,0,0,0.35)'; c.lineWidth=2; c.strokeRect(x+1,y+1,s-2,s-2); c.strokeStyle='rgba(255,255,255,0.12)'; c.lineWidth=2; c.strokeRect(x+0.5,y+0.5,s-1,s-1); }
   function render(){ const rect=stage.getBoundingClientRect(); const wScale=Math.floor(rect.width/(COLS*SIZE)), hScale=Math.floor(rect.height/(ROWS*SIZE)), scale=Math.max(1, Math.min(wScale,hScale)); canvas.style.width=(COLS*SIZE*scale)+'px'; canvas.style.height=(ROWS*SIZE*scale)+'px'; ctx.clearRect(0,0,canvas.width,canvas.height); for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){ const t=board[y][x]; drawCell(ctx,x*SIZE,y*SIZE,SIZE,t?COLORS[t]:COLORS.X); } if(current){ const m=current.m, color=COLORS[current.t]; for(let y=0;y<m.length;y++) for(let x=0;x<m[0].length;x++){ if(m[y][x]) drawCell(ctx,(current.x+x)*SIZE,(current.y+y)*SIZE,SIZE,color); } } }
   function loop(ts){ requestAnimationFrame(loop); render(); update(ts - (window.__last||ts)); window.__last = ts; }
   function gameOver(){ running=false; resetGame(true); }
-  function resetGame(keepOverlay){ board=makeBoard(); current=null; nextType=pickType(); dropInterval=gravityMsForLevel(level=0); lastTime=0; acc=0; lines=0; if(!keepOverlay){ overlay.classList.remove('hidden'); startFab.classList.remove('hidden'); } updateControlsInert(); }
+  function resetGame(keepOverlay){ board=makeBoard(); current=null; nextType=pickType(); dropInterval=gravityMsForLevel(level=0); lastTime=0; acc=0; lines=0; if(!keepOverlay){ overlay.classList.remove('hidden'); startFab.classList.remove('hidden'); } }
 
   // Start
   async function __startGame(startAudio=true){
-    if(startAudio){ const ok = await initAudio(); applyLoopInputs(); setTrackByIndex(idxOf(trackSel.value), false); if(!ok){ console.warn('오디오 권한/초기화 실패 – 게임은 무음으로 시작'); } }
+    if(startAudio){ const ok = await initAudio(); applyLoopInputs(); setTrackByIndex(order.indexOf(trackSel.value), false); if(!ok){ console.warn('오디오 권한/초기화 실패 – 게임은 무음으로 시작'); } }
     overlay.classList.add('hidden'); startFab.classList.add('hidden');
-    if(current==null) spawn(); running = true; requestAnimationFrame(loop); canvas.focus({preventScroll:true}); updateControlsInert();
+    if(current==null) spawn(); running = true; requestAnimationFrame(loop); canvas.focus({preventScroll:true});
   }
   window.__startGameFromUI = __startGame;
 
